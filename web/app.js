@@ -463,6 +463,9 @@
     expCategory: '全部',
     categorySubFilter: '全部',
     searchQuery: '',
+    searchScope: 'ALL', // ALL | POSTS | COURSES | EXPERIENCES
+    aiStats: { status: 'idle', queryKey: '', report: null },
+    aiTimer: null,
     modal: null,       // null | { type, data }
     marqueeRaf: null,
     marqueePaused: false
@@ -917,7 +920,25 @@
     `;
   }
 
-  // ---------------- Sub-Screen: COURSE ARCHIVE (选课评价) ----------------
+  // ---------------- Sub-Screen: COURSE ARCHIVE (选课评价 — 1:1 CourseArchiveScreen.kt) ----------------
+  function getCourseConsensus(c) {
+    const reviews = c.reviews || [];
+    if (!reviews.length) {
+      return { attendance: null, exam: null, tags: [c.suitableFor || '待补充评价'] };
+    }
+    const countMode = (arr) => {
+      const m = new Map();
+      arr.filter(Boolean).forEach(x => m.set(x, (m.get(x) || 0) + 1));
+      let best = arr[0] || '', max = 0;
+      m.forEach((v, k) => { if (v > max) { max = v; best = k; } });
+      return best;
+    };
+    const att = countMode(reviews.map(r => r.attendanceMode));
+    const exam = countMode(reviews.map(r => r.examFormat));
+    const tagSet = Array.from(new Set(reviews.map(r => r.suitableTag).filter(Boolean))).slice(0, 2);
+    return { attendance: att, exam: exam, tags: tagSet.length ? tagSet : [c.suitableFor] };
+  }
+
   function renderCourseArchiveScreen() {
     const f = nav.courseFilters;
     const campuses = ['全部校区', ...Object.keys(D.CAFA_CAMPUS_COLLEGES)];
@@ -941,7 +962,6 @@
       return matchQ && matchCampus && matchCollege && matchType;
     });
 
-    // Group by canonical 6 subject categories
     const groupsMap = new Map();
     D.COURSE_CATEGORIES.forEach(cat => groupsMap.set(cat, []));
     filtered.forEach(c => {
@@ -962,33 +982,35 @@
         </div>
       `;
       items.forEach(c => {
-        const rated = c.recommendScore > 0;
+        const hasReviews = (c.reviews || []).length > 0 || c.recommendScore > 0;
         const typeCls = c.courseType === '体育选修' ? 'pe' : c.courseType === '公共选修' ? 'pub' : 'cross';
-        const isWarn = c.suitableFor === '慎选避雷';
+        const cons = getCourseConsensus(c);
         listHtml += `
-          <div class="course-card-wrap">
-            <div class="gb-card clickable" data-action="openCourseDetail" data-id="${esc(c.id)}">
-              <div class="gb-card-inner">
-                <div class="course-card-inner">
-                  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;">
-                    <div style="flex:1;min-width:0;">
-                      <h3 class="course-name">${esc(c.name)}</h3>
-                      <div class="course-meta-line" style="margin-top:0.2rem;">${esc(c.instructor)} · ${esc(c.campus)} · ${esc(c.college)}</div>
-                    </div>
-                    <span class="course-type-badge ${typeCls}">${esc(c.courseType)}</span>
-                  </div>
-                  <p class="course-summary">${esc(c.summary)}</p>
-                  <div class="course-metrics-bar">
-                    <div><div class="metric-val">${rated ? c.workloadScore.toFixed(1) : '--'}</div><div class="metric-lbl">作业肝度</div></div>
-                    <div><div class="metric-val">${rated ? c.difficultyScore.toFixed(1) : '--'}</div><div class="metric-lbl">给分友好</div></div>
-                    <div><div class="metric-val" style="color:${isWarn ? 'var(--vermilion)' : 'var(--active-tint)'};">${rated ? c.recommendScore.toFixed(1) : '--'}</div><div class="metric-lbl">推荐指数</div></div>
-                  </div>
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <span class="course-type-badge ${isWarn ? 'warn' : 'cross'}">${esc(c.suitableFor)}</span>
-                    <span style="font-size:0.75rem;color:var(--ink-secondary);">${(c.reviews || []).length} 条真实评价 →</span>
-                  </div>
-                </div>
+          <div class="course-card-surface" data-action="openCourseDetail" data-id="${esc(c.id)}" style="cursor:pointer;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
+              <div style="display:flex;align-items:center;gap:0.4375rem;min-width:0;flex:1;">
+                <span class="course-type-badge ${typeCls}">${esc(c.courseType)}</span>
+                <span class="course-meta-line" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.campus)} · ${esc(c.college)}</span>
               </div>
+              <button class="icon-btn-48" style="width:2.25rem;height:2.25rem;color:${c.isBookmarked ? 'var(--active-tint)' : 'var(--ink-muted)'};" data-action="bookmarkCourse" data-id="${esc(c.id)}" aria-label="收藏课程">
+                ${c.isBookmarked ? ICONS.bookmarkFilled : ICONS.bookmark}
+              </button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:0.22rem;">
+              <h3 class="course-name">${esc(c.name)}</h3>
+              <div class="course-meta-line">授课教师：${esc(c.instructor)} · ${esc(c.major)}</div>
+              ${c.summary ? `<p class="course-summary" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${esc(c.summary)}</p>` : ''}
+            </div>
+            <div class="course-metrics-bar">
+              <div><div class="metric-val highlight">${hasReviews ? c.recommendScore.toFixed(1) : '--'}</div><div class="metric-lbl">综合推荐</div></div>
+              <div><div class="metric-val">${hasReviews ? c.difficultyScore.toFixed(1) : '--'}</div><div class="metric-lbl">给分友好</div></div>
+              <div><div class="metric-val">${hasReviews ? c.workloadScore.toFixed(1) : '--'}</div><div class="metric-lbl">作业强度</div></div>
+              <div><div class="metric-val">${(c.reviews || []).length} 份</div><div class="metric-lbl">参与共建</div></div>
+            </div>
+            <div class="consensus-row">
+              ${cons.attendance ? `<span class="consensus-badge">考勤：${esc(cons.attendance)}</span>` : ''}
+              ${cons.exam ? `<span class="consensus-badge">考核：${esc(cons.exam)}</span>` : ''}
+              ${cons.tags.map(t => `<span class="consensus-badge ${t === '慎选避雷' ? 'warning' : ''}">${esc(t)}</span>`).join('')}
             </div>
           </div>
         `;
@@ -1021,9 +1043,13 @@
               ${types.map(tp => `<button class="mono-chip ${f.type === tp ? 'inverted' : ''}" data-action="courseType" data-val="${esc(tp)}">${esc(tp)}</button>`).join('')}
             </div>
             ${showNotice ? `<div class="notice-box"><span style="width:1rem;height:1rem;color:var(--indigo);flex-shrink:0;margin-top:0.1rem;">${ICONS.info}</span><span>${esc(D.CROSS_COLLEGE_NOTICE)}</span></div>` : ''}
+            <div class="college-filter-head">
+              <span style="font-size:0.75rem;color:var(--ink-secondary);">按学院筛选（当前：${esc(f.college)}）</span>
+              <button class="more-college-pill" data-action="openAllColleges">更多学院 (18) ⌄</button>
+            </div>
             <div class="h-scroll-row" style="padding:0;">
               ${colleges.slice(0, 5).map(cl => `<button class="mono-chip ${f.college === cl ? 'inverted' : ''}" data-action="courseCollege" data-val="${esc(cl)}">${esc(cl)}</button>`).join('')}
-              <button class="mono-chip" style="border:1px solid var(--indigo);color:var(--active-tint);" data-action="openAllColleges">更多学院 (18)</button>
+              <button class="more-college-pill" data-action="openAllColleges">更多 ⌄</button>
             </div>
           </div>
           ${listHtml}
@@ -1035,38 +1061,46 @@
   function renderCourseDetailScreen(courseId) {
     const c = state.courses.find(x => x.id === courseId);
     if (!c) return '';
-    const rated = c.recommendScore > 0;
-    const isWarn = c.suitableFor === '慎选避雷';
+    const hasReviews = (c.reviews || []).length > 0 || c.recommendScore > 0;
+    const cons = getCourseConsensus(c);
     return `
       <div class="screen-container">
         <div class="sub-topbar">
           <div class="sub-topbar-left">
             <button class="icon-btn-48" data-action="goBack">${ICONS.arrowBack}</button>
-            <h1 class="sub-topbar-title">${esc(c.name)}</h1>
+            <div style="min-width:0;flex:1;">
+              <div style="font-size:0.6875rem;color:var(--ink-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.campus)} · ${esc(c.college)}</div>
+              <h1 class="sub-topbar-title" style="font-size:1rem;">${esc(c.name)}</h1>
+            </div>
           </div>
-          <button class="icon-btn-48" data-action="bookmarkCourse" data-id="${esc(c.id)}" style="color:${c.isBookmarked ? 'var(--indigo)' : 'var(--ink-secondary)'};">
+          <button class="icon-btn-48" data-action="bookmarkCourse" data-id="${esc(c.id)}" style="color:${c.isBookmarked ? 'var(--active-tint)' : 'var(--ink-secondary)'};">
             ${c.isBookmarked ? ICONS.bookmarkFilled : ICONS.bookmark}
           </button>
         </div>
-        <div class="scroll-area sub-scroll" style="padding:1rem;">
-          <div class="gb-card" style="margin-bottom:1rem;">
-            <div class="gb-card-inner" style="padding:1rem;display:flex;flex-direction:column;gap:0.625rem;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
-                <span class="course-type-badge cross">${esc(c.courseType)} · ${esc(c.major)}</span>
-                <span class="course-type-badge ${isWarn ? 'warn' : 'pub'}">${esc(c.suitableFor)}</span>
-              </div>
-              <h2 style="margin:0;font-size:1.1875rem;">${esc(c.name)}</h2>
-              <div style="font-size:0.8125rem;color:var(--ink-secondary);">授课教师：${esc(c.instructor)} · ${esc(c.campus)} · ${esc(c.college)}</div>
-              <p style="margin:0;font-size:0.875rem;line-height:1.55;">${esc(c.summary)}</p>
-              <div class="course-metrics-bar">
-                <div><div class="metric-val">${rated ? c.workloadScore.toFixed(1) : '--'}</div><div class="metric-lbl">作业肝度</div></div>
-                <div><div class="metric-val">${rated ? c.difficultyScore.toFixed(1) : '--'}</div><div class="metric-lbl">给分友好</div></div>
-                <div><div class="metric-val" style="color:${isWarn ? 'var(--vermilion)' : 'var(--active-tint)'};">${rated ? c.recommendScore.toFixed(1) : '--'}</div><div class="metric-lbl">推荐指数</div></div>
-              </div>
+        <div class="scroll-area sub-scroll" style="padding:0.875rem;">
+          <div class="course-card-surface" style="margin:0 0 0.875rem;">
+            <div class="h-scroll-row" style="padding:0;">
+              <span class="mono-chip inverted">${esc(c.courseType)}</span>
+              <span class="mono-chip">${esc(c.campus)}</span>
+              <span class="mono-chip">${esc(c.college)}</span>
+            </div>
+            <h2 style="margin:0.125rem 0 0;font-size:1.25rem;line-height:1.3;">${esc(c.name)}</h2>
+            <div style="font-size:0.8125rem;color:var(--ink-secondary);">授课教师：${esc(c.instructor)} · ${esc(c.major)}</div>
+            <p style="margin:0;font-size:0.875rem;line-height:1.55;">${esc(c.summary)}</p>
+            <div class="course-metrics-bar">
+              <div><div class="metric-val highlight">${hasReviews ? c.recommendScore.toFixed(1) : '--'}</div><div class="metric-lbl">综合推荐</div></div>
+              <div><div class="metric-val">${hasReviews ? c.difficultyScore.toFixed(1) : '--'}</div><div class="metric-lbl">给分友好</div></div>
+              <div><div class="metric-val">${hasReviews ? c.workloadScore.toFixed(1) : '--'}</div><div class="metric-lbl">作业强度</div></div>
+              <div><div class="metric-val">${(c.reviews || []).length} 份</div><div class="metric-lbl">参与共建</div></div>
+            </div>
+            <div class="consensus-row">
+              ${cons.attendance ? `<span class="consensus-badge">考勤：${esc(cons.attendance)}</span>` : ''}
+              ${cons.exam ? `<span class="consensus-badge">考核：${esc(cons.exam)}</span>` : ''}
+              ${cons.tags.map(t => `<span class="consensus-badge ${t === '慎选避雷' ? 'warning' : ''}">${esc(t)}</span>`).join('')}
             </div>
           </div>
 
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.625rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.625rem;padding:0 0.125rem;">
             <h3 style="margin:0;font-size:1rem;">同学评价 (${(c.reviews || []).length})</h3>
             <button class="btn-grad-sm" data-action="openAddReview" data-id="${esc(c.id)}">${ICONS.edit}<span>写评价</span></button>
           </div>
@@ -1077,7 +1111,7 @@
                 <div style="display:flex;align-items:center;gap:0.5rem;">
                   ${avatarHtml(r.author.avatarSeed, 'avatar-24')}
                   <strong style="font-size:0.8125rem;">${esc(r.author.nickname)}</strong>
-                  <span class="mono-chip" style="padding:0.125rem 0.45rem;">${esc(r.suitableTag)}</span>
+                  <span class="consensus-badge ${r.suitableTag === '慎选避雷' ? 'warning' : ''}">${esc(r.suitableTag)}</span>
                 </div>
                 <span style="font-size:0.75rem;color:var(--ink-muted);">${esc(r.createdAt)}</span>
               </div>
@@ -1085,7 +1119,7 @@
               <div style="font-size:0.75rem;color:var(--ink-secondary);display:flex;flex-wrap:wrap;gap:0.625rem;">
                 <span>推荐 ${r.recommend}/5</span>
                 <span>给分 ${r.difficulty}/5</span>
-                <span>肝度 ${r.workload}/5</span>
+                <span>作业 ${r.workload}/5</span>
                 <span>${esc(r.attendanceMode)}</span>
                 <span>${esc(r.examFormat)}</span>
               </div>
@@ -1096,7 +1130,7 @@
     `;
   }
 
-  // ---------------- Sub-Screen: SENIOR EXPERIENCE (学长学姐说) ----------------
+  // ---------------- Sub-Screen: SENIOR EXPERIENCE (学长学姐说 — 1:1 SeniorExperienceScreen.kt) ----------------
   function renderSeniorScreen() {
     const cats = ['全部', '留学', '毕业作品', '考研', '就业', '工作室'];
     const list = state.experiences.filter(e => nav.expCategory === '全部' || e.category === nav.expCategory);
@@ -1108,18 +1142,22 @@
             <h1 class="sub-topbar-title">学长学姐说</h1>
           </div>
         </div>
-        <div class="h-scroll-row" style="background:var(--surface);border-bottom:0.6px solid var(--outline-soft);padding:0.625rem 1rem;">
-          ${cats.map(cat => `<button class="mono-chip ${nav.expCategory === cat ? 'inverted' : ''}" data-action="expCat" data-val="${cat}">${cat}</button>`).join('')}
-        </div>
-        <div class="scroll-area sub-scroll" style="padding:0.75rem 1rem;">
-          ${list.map(e => `
-            <div class="gb-card clickable" style="margin-bottom:0.875rem;" data-action="openExpDetail" data-id="${esc(e.id)}">
-              <div class="gb-card-inner" style="padding:1rem;display:flex;flex-direction:column;gap:0.5rem;">
+        <div class="scroll-area sub-scroll">
+          <div class="editorial-hero-banner fluid-aurora-light">
+            <div style="font-size:1.1875rem;font-weight:700;color:var(--ink);">把走过的路，留给后来的人。</div>
+            <div style="font-size:0.75rem;color:var(--ink-secondary);">考研、留学、毕设与工作室真实问答 · 回答需标注哪一届</div>
+          </div>
+          <div class="h-scroll-row" style="background:var(--surface);border-bottom:0.6px solid var(--outline-soft);padding:0.75rem 1.25rem;">
+            ${cats.map(cat => `<button class="mono-chip ${nav.expCategory === cat ? 'inverted' : ''}" data-action="expCat" data-val="${cat}">${cat}</button>`).join('')}
+          </div>
+          <div style="padding:0.75rem 0.875rem;">
+            ${list.map(e => `
+              <div class="course-card-surface" style="margin:0 0 0.75rem;cursor:pointer;" data-action="openExpDetail" data-id="${esc(e.id)}">
                 <div style="display:flex;justify-content:space-between;align-items:center;">
                   <span class="course-type-badge pub">${esc(e.category)} · ${esc(e.year)}</span>
                   <span style="font-size:0.75rem;color:var(--ink-muted);">约 ${e.readMinutes} 分钟阅读</span>
                 </div>
-                <h3 style="margin:0;font-size:1rem;line-height:1.4;">${esc(e.title)}</h3>
+                <h3 style="margin:0;font-size:1rem;line-height:1.4;color:var(--ink);">${esc(e.title)}</h3>
                 <p style="margin:0;font-size:0.8125rem;line-height:1.5;color:var(--ink-secondary);">${esc(e.summary)}</p>
                 ${e.image ? `<img src="${esc(e.image)}" alt="经验配图" style="width:100%;height:9.5rem;object-fit:cover;border-radius:0.625rem;" loading="lazy" />` : ''}
                 <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.75rem;color:var(--ink-secondary);">
@@ -1130,8 +1168,8 @@
                   <span>♥ ${e.likeCount} · ★ ${e.bookmarkCount}</span>
                 </div>
               </div>
-            </div>
-          `).join('')}
+            `).join('')}
+          </div>
         </div>
       </div>
     `;
@@ -1147,7 +1185,7 @@
             <button class="icon-btn-48" data-action="goBack">${ICONS.arrowBack}</button>
             <h1 class="sub-topbar-title">经验详情</h1>
           </div>
-          <button class="icon-btn-48" data-action="bookmarkExp" data-id="${esc(e.id)}" style="color:${e.isBookmarked ? 'var(--indigo)' : 'var(--ink-secondary)'};">
+          <button class="icon-btn-48" data-action="bookmarkExp" data-id="${esc(e.id)}" style="color:${e.isBookmarked ? 'var(--active-tint)' : 'var(--ink-secondary)'};">
             ${e.isBookmarked ? ICONS.bookmarkFilled : ICONS.bookmark}
           </button>
         </div>
@@ -1183,7 +1221,7 @@
     `;
   }
 
-  // ---------------- Sub-Screen: POST DETAIL (帖子详情) ----------------
+  // ---------------- Sub-Screen: POST DETAIL (帖子详情 — 1:1 PostDetailScreen.kt) ----------------
   function renderPostDetailScreen(postId) {
     const post = state.posts.find(p => p.id === postId);
     if (!post) return '';
@@ -1193,22 +1231,31 @@
         <div class="sub-topbar">
           <div class="sub-topbar-left">
             <button class="icon-btn-48" data-action="goBack">${ICONS.arrowBack}</button>
-            <h1 class="sub-topbar-title">帖子详情</h1>
+            <div style="display:flex;align-items:center;gap:0.4375rem;min-width:0;">
+              <span style="width:1.125rem;height:1.125rem;display:flex;color:var(--ink-secondary);flex-shrink:0;">${catIcon(post.category)}</span>
+              <h1 class="sub-topbar-title" style="font-size:1rem;">${esc(cat.titleCn)}</h1>
+            </div>
           </div>
-          <button class="icon-btn-48" data-action="sharePost" data-id="${esc(post.id)}">${ICONS.share}</button>
+          <button class="icon-btn-48" data-action="sharePost" data-id="${esc(post.id)}" aria-label="分享">${ICONS.share}</button>
         </div>
         <div class="scroll-area" style="padding-bottom:1.5rem;">
-          <div style="background:var(--surface);padding:1rem 1.125rem;">
-            <div class="post-compact-header" style="margin-bottom:0.75rem;">
+          <div style="background:var(--surface);padding:1.125rem 1.25rem;">
+            <div class="post-compact-header" style="margin-bottom:0.875rem;">
               <div class="post-author-row">
                 ${avatarHtml(post.author.avatarSeed, 'avatar-40')}
                 <div>
-                  <div class="post-author-name" style="font-size:0.9375rem;">${esc(post.author.nickname)}</div>
-                  <div class="post-time">${esc(post.createdAt)} · ${formatCompact(post.viewCount)} 浏览</div>
+                  <div style="display:flex;align-items:center;gap:0.375rem;">
+                    <span class="post-author-name" style="font-size:0.9375rem;">${esc(post.author.nickname)}</span>
+                    <span class="verified-badge" style="padding:0.1rem 0.375rem;font-size:0.625rem;">
+                      <span class="status-dot verified"></span><span>央美认证</span>
+                    </span>
+                  </div>
+                  <div class="post-time" style="margin-top:0.125rem;">${esc(post.createdAt)} · ${formatCompact(post.viewCount)} 浏览</div>
                 </div>
               </div>
               <span class="cat-pill ${esc(cat.accent)}">${catIcon(post.category)}<span>${esc(cat.titleCn)}</span></span>
             </div>
+            ${post.moodTag ? `<div style="margin-bottom:0.625rem;"><span class="mono-chip">树洞情绪 · ${esc(post.moodTag)}</span></div>` : ''}
             ${post.price ? `<div class="post-price" style="font-size:1.125rem;margin-bottom:0.375rem;">${esc(post.price)}</div>` : ''}
             ${post.title ? `<h2 style="margin:0 0 0.5rem;font-size:1.125rem;line-height:1.4;">${esc(post.title)}</h2>` : ''}
             <div style="font-size:0.9375rem;line-height:1.68;white-space:pre-line;color:var(--ink);">${esc(post.body)}</div>
@@ -1227,7 +1274,7 @@
             </div>
           </div>
 
-          <div style="padding:0.875rem 1.125rem 0.375rem;font-size:0.875rem;font-weight:700;color:var(--ink);">
+          <div style="padding:0.875rem 1.25rem 0.375rem;font-size:0.875rem;font-weight:700;color:var(--ink);">
             全部评论 (${(post.comments || []).length})
           </div>
           <div style="background:var(--surface);">
@@ -1252,7 +1299,7 @@
           </div>
         </div>
         <form class="comment-composer-bar" id="comment-form" data-post-id="${esc(post.id)}">
-          <input class="field-input" id="comment-input" placeholder="以「${esc(state.persona.nickname)}」匿名回复..." autocomplete="off" />
+          <input class="field-input" id="comment-input" placeholder="匿名写下你的回应..." autocomplete="off" />
           <button type="submit" class="btn-grad-sm" style="min-height:2.75rem;padding:0 1rem;">发送</button>
         </form>
       </div>
@@ -1285,9 +1332,9 @@
           </div>
         </div>
         <div class="scroll-area sub-scroll">
-          <div class="fluid-aurora-light" style="padding:1.125rem 1.25rem;border-bottom:0.6px solid var(--outline-soft);">
+          <div class="editorial-hero-banner fluid-aurora-light">
             <div style="font-size:1rem;font-weight:700;color:var(--ink);">${esc(cat.desc)}</div>
-            <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.25rem;">共 ${list.length} 条内容</div>
+            <div style="font-size:0.75rem;color:var(--ink-secondary);">共 ${list.length} 条内容</div>
           </div>
           ${subs.length ? `<div class="h-scroll-row" style="background:var(--surface);border-bottom:0.6px solid var(--outline-soft);padding:0.625rem 1.25rem;">
             ${subs.map(s => `<button class="mono-chip ${nav.categorySubFilter === s ? 'inverted' : ''}" data-action="catSubFilter" data-val="${esc(s)}">${esc(s)}</button>`).join('')}
@@ -1303,100 +1350,400 @@
     `;
   }
 
-  // ---------------- Sub-Screen: AI SEARCH & HOT TOPICS ----------------
-  function renderSearchScreen() {
-    const q = (nav.searchQuery || '').trim().toLowerCase();
-    const matchedPosts = q ? visiblePosts().filter(p => ((p.title || '') + ' ' + (p.body || '') + ' ' + (p.topicTags || []).join(' ')).toLowerCase().includes(q)) : [];
-    const matchedCourses = q ? state.courses.filter(c => (c.name + ' ' + c.instructor + ' ' + c.college + ' ' + c.summary).toLowerCase().includes(q)) : [];
-    const matchedExps = q ? state.experiences.filter(e => (e.title + ' ' + e.summary + ' ' + e.body).toLowerCase().includes(q)) : [];
+  // ---------------- Shared AI Campus Stats Engine + Weibo HotSearchBoardCard (1:1 Android) ----------------
+  function getAllLiveTagCounts() {
+    const map = new Map();
+    visiblePosts().forEach(p => {
+      (p.topicTags || []).forEach(t => {
+        const clean = t.trim();
+        if (clean) map.set(clean, (map.get(clean) || 0) + 1);
+      });
+    });
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]);
+  }
 
-    let resultsHtml = '';
+  function buildAiAnalysisReport(query) {
+    const q = (query || '').trim();
+    const ql = q.toLowerCase();
+    const posts = visiblePosts();
+    const courses = state.courses;
+    const exps = state.experiences;
+
     if (!q) {
-      resultsHtml = `
-        <div style="padding:0.875rem 1.125rem;">
-          <h3 style="margin:0 0 0.625rem;font-size:0.9375rem;">热门校园搜索</h3>
-          <div class="chip-wrap">
-            ${state.hotTopics.slice(0, 8).map(t => `<button class="mono-chip" data-action="quickSearch" data-q="${esc(t.tag.replace(/^#/, ''))}">${esc(t.tag)}</button>`).join('')}
-          </div>
+      const liveTags = getAllLiveTagCounts();
+      const topCourses = [...courses].filter(c => c.recommendScore >= 4.5).slice(0, 3).map(c => c.name);
+      const top5 = liveTags.slice(0, 5).map(([tag, cnt], idx) => ({
+        keyword: tag.replace(/^#/, ''),
+        mentions: cnt + (state.hotTopics[idx] ? Math.round(state.hotTopics[idx].discussionCount / 180) : 3),
+        trend: idx === 0 ? '飙升' : idx === 1 ? '热门' : idx === 2 ? '新锐' : '稳定'
+      }));
+      return {
+        headline: '央美全站热点与选课口碑洞察',
+        summary: `当前社区共聚合 ${posts.length} 篇动态、${courses.length} 门三校区选课档案与 ${exps.length} 篇学长学姐实战经验。高分推荐课程集中在「${topCourses.join('」「')}」等方向，晚间画室与毕业季讨论热度持续上升。`,
+        topKeywords: top5,
+        distributions: [
+          { label: '选课评价与跨院推荐', percent: 38 },
+          { label: '校园展览与创作互助', percent: 29 },
+          { label: '留学作品集与毕设经验', percent: 19 },
+          { label: '闲置画材与宿舍日常', percent: 14 }
+        ],
+        recommendedTags: ['#高分选修课', '#艺术创作', '#毕业作品', '#校园展览', '#闲置画材']
+      };
+    }
+
+    const mCourses = courses.filter(c =>
+      (c.name + c.instructor + c.college + c.major + c.summary + c.courseType + c.suitableFor).toLowerCase().includes(ql) ||
+      ((ql.includes('给分') || ql.includes('水课') || ql.includes('选修')) && c.recommendScore >= 4.4)
+    );
+    const mPosts = posts.filter(p => ((p.title || '') + (p.body || '') + (p.topicTags || []).join(' ') + (p.location || '')).toLowerCase().includes(ql));
+    const mExps = exps.filter(e => (e.title + e.summary + e.body + e.category + (e.tags || []).join(' ')).toLowerCase().includes(ql));
+
+    const total = mCourses.length + mPosts.length + mExps.length;
+    let headline = `关于「${q}」的 AI 校园情报汇总`;
+    let summary = '';
+
+    if (ql.includes('选修') || ql.includes('给分') || ql.includes('水课')) {
+      const top = [...courses].filter(c => c.difficultyScore >= 4.5).sort((a, b) => b.recommendScore - a.recommendScore).slice(0, 4);
+      headline = '央美高给分 / 热门选修课口碑排行';
+      summary = `结合三校区同学实测：${top.map(c => `《${c.name}》（${c.instructor}，推荐 ${c.recommendScore.toFixed(1)}）`).join('、')}普遍评价老师友好、作业轻松且给分可观；同时建议留意标注「慎选避雷」的课程评价。`;
+    } else if (ql.includes('留学') || ql.includes('作品集')) {
+      headline = '央美留学作品集与申请经验提炼';
+      summary = `学长学姐实战建议：皇艺/伦艺等名校更看重完整调研过程与材料实验，不必把所有作品做成同一种画风；建议提前 10 个月规划语言与排版节奏。`;
+    } else if (ql.includes('食堂') || ql.includes('望京')) {
+      headline = '望京本院周边生活与食堂讨论';
+      summary = `花家地南街与望京本院相关讨论集中在工作室晚归拼车、画材采购与课间简餐推荐，建议在「校园互助」板块直接找同校区搭子。`;
+    } else if (total > 0) {
+      summary = `已为您检索全站内容，共发现 ${mCourses.length} 门相关课程、${mExps.length} 篇经验攻略与 ${mPosts.length} 条校园帖子。点击下方结果或推荐标签可直达详情。`;
+    } else {
+      summary = `暂未找到直接包含「${q}」的历史记录，建议尝试拆短关键词（如「跨院选修」「画材」「毕设」），或直接发帖向央美同学提问。`;
+    }
+
+    const kwList = [];
+    mCourses.slice(0, 3).forEach((c, i) => kwList.push({ keyword: c.name, mentions: Math.max(3, (c.reviews || []).length + 4 - i), trend: i === 0 ? '飙升' : '热门' }));
+    mExps.slice(0, 2).forEach(e => kwList.push({ keyword: e.category + ' · ' + e.year, mentions: Math.max(2, e.likeCount), trend: '新锐' }));
+    if (kwList.length < 3) {
+      state.hotTopics.slice(0, 4 - kwList.length).forEach(t => kwList.push({ keyword: t.tag.replace(/^#/, ''), mentions: Math.round(t.discussionCount / 200), trend: '稳定' }));
+    }
+
+    const cPct = total ? Math.round((mCourses.length / total) * 100) : 40;
+    const pPct = total ? Math.round((mPosts.length / total) * 100) : 35;
+    const ePct = Math.max(5, 100 - cPct - pPct);
+
+    return {
+      headline,
+      summary,
+      topKeywords: kwList.slice(0, 5),
+      distributions: [
+        { label: '选课评价相关度', percent: Math.max(12, cPct) },
+        { label: '校园帖子讨论度', percent: Math.max(12, pPct) },
+        { label: '学长学姐经验沉淀', percent: Math.max(10, ePct) }
+      ],
+      recommendedTags: [
+        '#' + q.slice(0, 8),
+        '#跨院选修',
+        '#高分推荐',
+        '#校园互助'
+      ].filter((v, i, a) => a.indexOf(v) === i)
+    };
+  }
+
+  function triggerAiStats(query) {
+    const cleanQ = (query || '').trim();
+    if (nav.aiTimer) clearTimeout(nav.aiTimer);
+    nav.aiStats = { status: 'loading', queryKey: cleanQ, report: null };
+    render();
+    nav.aiTimer = setTimeout(() => {
+      nav.aiStats = {
+        status: 'ready',
+        queryKey: cleanQ,
+        report: buildAiAnalysisReport(cleanQ)
+      };
+      render();
+    }, 420);
+  }
+
+  function renderAiCampusStatsCard(query, matchedCount, totalTagCount) {
+    const cleanQ = (query || '').trim();
+    const isSameKey = nav.aiStats.queryKey === cleanQ;
+    const st = isSameKey ? nav.aiStats.status : 'idle';
+    const report = isSameKey ? nav.aiStats.report : null;
+
+    const title = cleanQ ? `AI 搜索「${cleanQ}」` : 'AI 智能搜索 · 校园标签统计';
+    const subtitle = cleanQ
+      ? `共匹配到 ${matchedCount} 条记录 · 点击生成 AI 解答与分析`
+      : `已聚合 ${totalTagCount} 个校园与自定义标签 · 支持自然语言 AI 搜索`;
+
+    const trendClass = (tr) => tr === '飙升' ? 'surge' : tr === '热门' ? 'hot' : tr === '新锐' ? 'fresh' : 'steady';
+    const rankBg = (i) => i === 0 ? '#E53935' : i === 1 ? '#EA580C' : i === 2 ? '#D97706' : '#6366F1';
+
+    let bodyHtml = '';
+    if (st === 'loading') {
+      bodyHtml = `
+        <div class="ai-stats-loading">
+          <div class="ai-spinner"></div>
+          <span>${cleanQ ? `正在检索全站帖子、选课与经验，生成「${esc(cleanQ)}」的 AI 分析...` : '正在分析全站校园与自定义标签统计...'}</span>
+        </div>
+      `;
+    } else if (st === 'ready' && report) {
+      bodyHtml = `
+        <div class="ai-summary-box">
+          <div class="ai-summary-headline">${esc(report.headline)}</div>
+          <div class="ai-summary-body">${esc(report.summary)}</div>
+        </div>
+        <div class="ai-subhead">高频关键词与标签统计</div>
+        <div class="ai-kw-list">
+          ${report.topKeywords.map((kw, i) => `
+            <button class="ai-kw-row" data-action="quickAiPrompt" data-q="${esc(kw.keyword)}">
+              <span class="ai-kw-rank" style="background:${rankBg(i)};">${i + 1}</span>
+              <span class="ai-kw-label">${esc(kw.keyword)}</span>
+              <span class="ai-trend-pill ${trendClass(kw.trend)}">${esc(kw.trend)}</span>
+              <span class="ai-kw-mentions">${kw.mentions} 次提及</span>
+            </button>
+          `).join('')}
+        </div>
+        <div class="ai-subhead">主题与情绪分布</div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;">
+          ${report.distributions.map(d => `
+            <div class="ai-dist-row">
+              <div class="ai-dist-head">
+                <span style="color:var(--ink);font-weight:500;">${esc(d.label)}</span>
+                <span style="color:var(--active-tint);font-weight:700;">${d.percent}%</span>
+              </div>
+              <div class="ai-dist-track"><div class="ai-dist-fill" style="width:${Math.min(100, d.percent)}%;"></div></div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="ai-subhead">AI 推荐探索标签</div>
+        <div class="chip-wrap">
+          ${report.recommendedTags.map(t => `<button class="search-chip-pill prompt" data-action="quickAiPrompt" data-q="${esc(t.replace(/^#/, ''))}">${esc(t)}</button>`).join('')}
         </div>
       `;
     } else {
-      const total = matchedPosts.length + matchedCourses.length + matchedExps.length;
-      resultsHtml = `
-        <div style="padding:0.75rem 1rem 0;">
-          <div class="gb-card" style="margin-bottom:0.75rem;">
-            <div class="gb-card-inner fluid-aurora-light" style="padding:0.875rem 1rem;">
-              <div style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;font-weight:700;color:var(--active-tint);margin-bottom:0.3125rem;">
-                <span style="width:0.9375rem;height:0.9375rem;display:flex;">${ICONS.sparkle}</span><span>树窝智能聚合概览</span>
-              </div>
-              <div style="font-size:0.8125rem;line-height:1.5;color:var(--ink);">
-                共匹配到 <strong>${total}</strong> 条相关校园记录：${matchedCourses.length} 门课程评价、${matchedPosts.length} 篇社区帖子、${matchedExps.length} 篇学长学姐经验。
+      bodyHtml = `
+        <p class="ai-stats-idle-text">
+          ${cleanQ
+            ? `点击右侧「AI 搜索」基于央美帖子、选课评价、学长学姐说为您智能汇总「${esc(cleanQ)}」的真实口碑与建议。`
+            : '输入任意央美问题或关键词即可触发 AI 智能搜索，也可点击右侧「AI 搜索」一键汇总全站热点、选课口碑与自定义标签分布。'}
+        </p>
+      `;
+    }
+
+    return `
+      <div class="ai-stats-card">
+        <div class="ai-stats-inner">
+          <div class="ai-stats-header">
+            <div class="ai-stats-title-row">
+              <span class="ai-stats-icon-box">${ICONS.sparkle}</span>
+              <div style="min-width:0;flex:1;">
+                <h3 class="ai-stats-title">${esc(title)}</h3>
+                <p class="ai-stats-sub">${esc(subtitle)}</p>
               </div>
             </div>
+            <button class="ai-stats-cta ${st === 'ready' ? 'outline' : ''}" data-action="runAiSearch">
+              ${st === 'ready' ? ICONS.refresh : ICONS.sparkle}
+              <span>${st === 'ready' ? '重新生成' : 'AI 搜索'}</span>
+            </button>
           </div>
+          ${bodyHtml}
         </div>
-        ${matchedCourses.map(c => `
-          <div class="course-card-wrap">
-            <div class="post-card" style="margin:0;padding:0.875rem 1rem;" data-action="openCourseDetail" data-id="${esc(c.id)}">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <strong>${esc(c.name)}</strong>
-                <span class="course-type-badge cross">${esc(c.courseType)}</span>
-              </div>
-              <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.2rem;">${esc(c.instructor)} · ${esc(c.campus)} · ${esc(c.college)}</div>
+      </div>
+    `;
+  }
+
+  function renderHotSearchBoardCard(rankedTopics) {
+    const badgeColor = (ch) => {
+      if (ch === '沸') return '#E53935';
+      if (ch === '热') return '#EA580C';
+      if (ch === '新') return '#D946EF';
+      if (ch === '荐') return '#6366F1';
+      return '';
+    };
+    return `
+      <div class="hot-board-card">
+        ${rankedTopics.map((topic, idx) => {
+          const rank = idx + 1;
+          const rCls = rank === 1 ? 'r1' : rank === 2 ? 'r2' : rank === 3 ? 'r3' : '';
+          const ch = (topic.heatStatus || '').trim().slice(0, 1);
+          const bg = badgeColor(ch);
+          return `
+            <button class="hot-board-row" data-action="openTopic" data-tag="${esc(topic.tag)}">
+              <span class="hot-board-rank ${rCls}">${rank}</span>
+              <span class="hot-board-main">
+                <span class="hot-board-title ${rank <= 3 ? 'top3' : ''}">${esc(topic.tag.replace(/^#/, ''))}</span>
+                <span class="hot-board-count">${formatCompact(topic.discussionCount)}</span>
+              </span>
+              ${bg ? `<span class="hot-board-badge" style="background:${bg};">${esc(ch)}</span>` : ''}
+            </button>
+            ${idx < rankedTopics.length - 1 ? '<div class="hairline" style="margin:0 0.875rem;width:auto;"></div>' : ''}
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  // ---------------- Sub-Screen: AI SEARCH (搜索 — 1:1 SearchScreen.kt) ----------------
+  function renderSearchScreen() {
+    const rawQ = nav.searchQuery || '';
+    const q = rawQ.trim();
+    const ql = q.toLowerCase();
+    const posts = visiblePosts();
+    const rankedTopics = [...state.hotTopics].sort((a, b) => b.discussionCount - a.discussionCount);
+    const liveTags = getAllLiveTagCounts();
+    const totalTagCount = liveTags.length;
+
+    const matchedPosts = q ? posts.filter(p => ((p.title || '') + ' ' + (p.body || '') + ' ' + (p.topicTags || []).join(' ') + ' ' + (p.location || '')).toLowerCase().includes(ql)) : [];
+    const matchedCourses = q ? state.courses.filter(c => (c.name + ' ' + c.instructor + ' ' + c.college + ' ' + c.major + ' ' + c.summary).toLowerCase().includes(ql)) : [];
+    const matchedExps = q ? state.experiences.filter(e => (e.title + ' ' + e.summary + ' ' + e.body + ' ' + e.category).toLowerCase().includes(ql)) : [];
+    const totalMatches = matchedPosts.length + matchedCourses.length + matchedExps.length;
+
+    const scopes = [
+      { key: 'ALL', label: '全部' },
+      { key: 'POSTS', label: '帖子' },
+      { key: 'COURSES', label: '选课评价' },
+      { key: 'EXPERIENCES', label: '学长学姐说' }
+    ];
+    const quickPrompts = ['哪些选修课给分高', '水课推荐', '望京食堂吃什么', '留学作品集经验', '闲置画材'];
+
+    let contentHtml = '';
+    if (!q) {
+      contentHtml = `
+        <div style="display:flex;flex-direction:column;gap:0.75rem;padding-top:0.25rem;">
+          ${liveTags.length ? `
+            <div class="h-scroll-row" style="padding:0 0.875rem;">
+              ${liveTags.slice(0, 12).map(([tag, cnt]) => `
+                <button class="search-chip-pill" data-action="quickAiPrompt" data-q="${esc(tag.replace(/^#/, ''))}">
+                  <span>${esc(tag)}</span>
+                  <span style="color:var(--ink-muted);font-size:0.6875rem;">· ${cnt}</span>
+                </button>
+              `).join('')}
             </div>
+          ` : ''}
+
+          <div class="h-scroll-row" style="padding:0 0.875rem;">
+            ${quickPrompts.map(prompt => `
+              <button class="search-chip-pill prompt" data-action="quickAiPrompt" data-q="${esc(prompt)}">
+                ${ICONS.sparkle}<span>${esc(prompt)}</span>
+              </button>
+            `).join('')}
           </div>
-        `).join('')}
-        ${matchedExps.map(e => `
-          <div class="post-card" style="padding:0.875rem 1rem;" data-action="openExpDetail" data-id="${esc(e.id)}">
-            <span class="course-type-badge pub">学长学姐说 · ${esc(e.category)}</span>
-            <div style="font-weight:700;margin-top:0.3125rem;font-size:0.9375rem;">${esc(e.title)}</div>
+
+          ${renderAiCampusStatsCard('', posts.length, totalTagCount)}
+
+          <div class="hot-board-head">
+            <div style="display:flex;align-items:center;gap:0.375rem;">
+              <span style="width:1.125rem;height:1.125rem;color:var(--vermilion);display:flex;">${ICONS.fire}</span>
+              <span style="font-size:1rem;font-weight:700;color:var(--ink);">央美热搜榜</span>
+            </div>
+            <span style="font-size:0.75rem;color:var(--ink-secondary);">实时更新</span>
           </div>
-        `).join('')}
-        ${matchedPosts.map(renderEditorialPostCard).join('')}
-        ${total === 0 ? `<div class="empty-state"><div class="empty-state-title">没有找到「${esc(nav.searchQuery)}」相关内容</div></div>` : ''}
+
+          ${renderHotSearchBoardCard(rankedTopics)}
+        </div>
+      `;
+    } else {
+      const showCourses = (nav.searchScope === 'ALL' || nav.searchScope === 'COURSES') && matchedCourses.length > 0;
+      const showExps = (nav.searchScope === 'ALL' || nav.searchScope === 'EXPERIENCES') && matchedExps.length > 0;
+      const showPosts = (nav.searchScope === 'ALL' || nav.searchScope === 'POSTS') && matchedPosts.length > 0;
+
+      contentHtml = `
+        <div style="display:flex;flex-direction:column;gap:0.75rem;padding-top:0.25rem;">
+          ${renderAiCampusStatsCard(q, totalMatches, totalTagCount)}
+
+          ${showCourses ? `
+            <div class="search-group-sec-title">选课评价 (${matchedCourses.length})</div>
+            <div class="search-result-card">
+              ${matchedCourses.map((c, idx) => `
+                <button class="search-result-row" data-action="openCourseDetail" data-id="${esc(c.id)}">
+                  <div style="min-width:0;flex:1;">
+                    <div style="font-size:0.9375rem;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(c.name)}</div>
+                    <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.15rem;">${esc(c.instructor)} · ${esc(c.college)}</div>
+                  </div>
+                  <div style="text-align:right;flex-shrink:0;">
+                    <div style="font-size:0.875rem;font-weight:700;color:var(--active-tint);">${c.recommendScore > 0 ? '综合 ' + c.recommendScore.toFixed(1) : '待评分'}</div>
+                    <div style="font-size:0.6875rem;color:var(--ink-muted);">${esc(c.courseType)}</div>
+                  </div>
+                </button>
+                ${idx < matchedCourses.length - 1 ? '<div class="hairline" style="margin:0 0.875rem;width:auto;"></div>' : ''}
+              `).join('')}
+            </div>
+          ` : ''}
+
+          ${showExps ? `
+            <div class="search-group-sec-title">学长学姐说 (${matchedExps.length})</div>
+            <div class="search-result-card">
+              ${matchedExps.map((e, idx) => `
+                <button class="search-result-row" data-action="openExpDetail" data-id="${esc(e.id)}">
+                  <div style="min-width:0;flex:1;">
+                    <div style="font-size:0.6875rem;color:var(--active-tint);font-weight:600;">${esc(e.category)} · ${esc(e.year)}</div>
+                    <div style="font-size:0.9375rem;font-weight:600;color:var(--ink);margin-top:0.125rem;">${esc(e.title)}</div>
+                    <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.125rem;">${esc(e.author.nickname)} · ${esc(e.college)}</div>
+                  </div>
+                  <span style="width:1rem;height:1rem;color:var(--ink-muted);display:flex;flex-shrink:0;">${ICONS.chevronRight}</span>
+                </button>
+                ${idx < matchedExps.length - 1 ? '<div class="hairline" style="margin:0 0.875rem;width:auto;"></div>' : ''}
+              `).join('')}
+            </div>
+          ` : ''}
+
+          ${showPosts ? `
+            <div class="search-group-sec-title">社区帖子 (${matchedPosts.length})</div>
+            <div>${matchedPosts.map(renderEditorialPostCard).join('')}</div>
+          ` : ''}
+
+          ${(!showCourses && !showExps && !showPosts) ? `
+            <div class="empty-state" style="padding:2.5rem 1.5rem;">
+              <div class="empty-state-title">没有找到「${esc(q)}」的直接匹配</div>
+              <div class="empty-state-sub">可以点击上方「AI 搜索」按钮，让树窝为你综合提炼相关建议</div>
+            </div>
+          ` : ''}
+        </div>
       `;
     }
 
     return `
       <div class="screen-container">
-        <div class="sub-topbar">
-          <div class="sub-topbar-left" style="padding-right:0.5rem;">
-            <button class="icon-btn-48" data-action="goBack">${ICONS.arrowBack}</button>
-            <input class="field-input" id="global-search-input" type="search" placeholder="AI 搜索选课、经验、闲置或提问..." value="${esc(nav.searchQuery)}" />
+        <div class="search-topbar">
+          <button class="icon-btn-48" style="width:2.75rem;height:2.75rem;" data-action="goBack" aria-label="返回">${ICONS.arrowBack}</button>
+          <div class="search-input-box">
+            <span class="search-input-icon">${ICONS.search}</span>
+            <input class="search-input-native" id="global-search-input" type="search" placeholder="AI 搜索帖子、选课、经验或提问..." value="${esc(rawQ)}" autocomplete="off" />
+            ${q ? `<button class="search-clear-btn" data-action="clearSearch" aria-label="清空">${ICONS.close}</button>` : ''}
           </div>
+          <button class="search-ai-submit" data-action="runAiSearch">
+            ${ICONS.sparkle}<span>AI搜索</span>
+          </button>
         </div>
-        <div class="scroll-area sub-scroll">${resultsHtml}</div>
+        ${q ? `
+          <div class="h-scroll-row" style="padding:0.125rem 0.875rem 0.5rem;">
+            ${scopes.map(s => `<button class="search-chip-pill ${nav.searchScope === s.key ? 'active' : ''}" data-action="searchScope" data-val="${s.key}">${s.label}</button>`).join('')}
+          </div>
+        ` : ''}
+        <div class="scroll-area sub-scroll">${contentHtml}</div>
       </div>
     `;
   }
 
+  // ---------------- Sub-Screen: HOT TOPICS (央美热搜榜 — 1:1 HotTopicsScreen.kt) ----------------
   function renderHotTopicsScreen() {
     const ranked = [...state.hotTopics].sort((a, b) => b.discussionCount - a.discussionCount);
+    const totalTagCount = getAllLiveTagCounts().length;
     return `
       <div class="screen-container">
-        <div class="sub-topbar">
+        <div class="sub-topbar transparent">
           <div class="sub-topbar-left">
-            <button class="icon-btn-48" data-action="goBack">${ICONS.arrowBack}</button>
-            <h1 class="sub-topbar-title">央美校园热搜榜</h1>
+            <button class="icon-btn-48" data-action="goBack" aria-label="返回">${ICONS.arrowBack}</button>
+            <div style="display:flex;align-items:center;gap:0.375rem;">
+              <span style="width:1.25rem;height:1.25rem;color:var(--vermilion);display:flex;">${ICONS.fire}</span>
+              <h1 class="sub-topbar-title">央美热搜榜</h1>
+            </div>
           </div>
+          <span style="font-size:0.75rem;color:var(--ink-secondary);padding-right:0.75rem;">实时更新</span>
         </div>
-        <div class="scroll-area sub-scroll" style="padding:0.75rem 1rem;">
-          ${ranked.map((t, i) => {
-            const rank = i + 1;
-            const rankCls = rank === 1 ? 'rank-1' : rank === 2 ? 'rank-2' : rank === 3 ? 'rank-3' : 'rank-other';
-            return `
-              <div class="post-card" style="margin:0 0 0.625rem;padding:0.875rem 1rem;" data-action="openTopic" data-tag="${esc(t.tag)}">
-                <div style="display:flex;align-items:center;gap:0.625rem;">
-                  <span class="rank-badge ${rankCls}" style="min-width:2.5rem;">NO.${rank < 10 ? '0' + rank : rank}</span>
-                  <div style="flex:1;min-width:0;">
-                    <div style="font-weight:700;font-size:0.9375rem;">${esc(t.tag)}</div>
-                    <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.1875rem;">${esc(t.description)}</div>
-                  </div>
-                  <span style="font-size:0.75rem;color:var(--ink-muted);white-space:nowrap;">${formatCompact(t.discussionCount)}</span>
-                </div>
-              </div>
-            `;
-          }).join('')}
+        <div class="scroll-area sub-scroll">
+          <div style="display:flex;flex-direction:column;gap:0.75rem;padding-top:0.25rem;">
+            ${renderAiCampusStatsCard('', visiblePosts().length, totalTagCount)}
+            ${renderHotSearchBoardCard(ranked)}
+          </div>
         </div>
       </div>
     `;
@@ -1404,6 +1751,7 @@
 
   function renderTopicDetailScreen(tag) {
     const clean = tag.startsWith('#') ? tag : '#' + tag;
+    const topic = state.hotTopics.find(t => t.tag.toLowerCase() === clean.toLowerCase());
     const list = visiblePosts().filter(p => (p.topicTags || []).some(t => t.includes(clean.replace('#', ''))) || (p.body || '').includes(clean.replace('#', '')));
     return `
       <div class="screen-container">
@@ -1412,9 +1760,90 @@
             <button class="icon-btn-48" data-action="goBack">${ICONS.arrowBack}</button>
             <h1 class="sub-topbar-title">${esc(clean)}</h1>
           </div>
+          <button class="icon-btn-48" data-action="openPublishWithTag" data-tag="${esc(clean)}" aria-label="参与话题">${ICONS.edit}</button>
         </div>
         <div class="scroll-area sub-scroll">
-          ${list.length ? list.map(renderEditorialPostCard).join('') : `<div class="empty-state"><div class="empty-state-title">话题下暂时还没有帖子</div></div>`}
+          <div class="editorial-hero-banner fluid-aurora-light" style="min-height:8.5rem;justify-content:space-between;">
+            <span style="font-size:0.75rem;color:var(--ink-secondary);">${list.length} 篇内容</span>
+            <div>
+              <div style="font-size:1.375rem;font-weight:800;color:var(--ink);">${esc(clean)}</div>
+              <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.25rem;">${esc(topic ? topic.description : `关于「${clean}」的校园匿名讨论。`)}</div>
+            </div>
+          </div>
+          ${list.length ? list.map(renderEditorialPostCard).join('') : `
+            <div class="empty-state">
+              <div class="empty-state-title">该话题下暂时还没有更多内容</div>
+              <button class="btn-grad-sm" style="padding:0.625rem 1.25rem;font-size:0.875rem;" data-action="openPublishWithTag" data-tag="${esc(clean)}">匿名参与 ${esc(clean)}</button>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  }
+
+  // ---------------- Sub-Screen: VERIFICATION (央美身份认证 — 1:1 VerificationScreen.kt) ----------------
+  function renderVerificationScreen() {
+    const p = state.persona;
+    const selType = nav.verifyDraftType || p.identityType || '在读学生';
+    return `
+      <div class="screen-container">
+        <div class="sub-topbar">
+          <div class="sub-topbar-left">
+            <button class="icon-btn-48" data-action="goBack" aria-label="返回">${ICONS.arrowBack}</button>
+            <h1 class="sub-topbar-title">央美身份认证</h1>
+          </div>
+        </div>
+        <div class="scroll-area sub-scroll">
+          <div class="verify-dark-hero fluid-aurora-dark">
+            <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.75rem;color:rgba(255,255,255,0.82);">
+              <span>中央美术学院 · CAFA</span>
+              <span>${p.isVerified ? '已认证' : '未认证'}</span>
+            </div>
+            <div>
+              <h2 style="margin:0;font-size:1.5rem;font-weight:800;color:#FFFFFF;">确认央美身份</h2>
+              <p style="margin:0.375rem 0 0;font-size:0.75rem;line-height:1.5;color:rgba(255,255,255,0.82);">
+                仅核验是否为中央美术学院在读学生或毕业校友，不收集学院与年级，认证资料严格保密不公开。
+              </p>
+            </div>
+          </div>
+          <div class="verify-steps-strip">
+            <div class="verify-step-node active"><span class="verify-step-num">01</span><span>确认身份</span></div>
+            <div class="verify-step-node ${p.isVerified ? 'active' : ''}"><span class="verify-step-num">02</span><span>拍照/传图</span></div>
+            <div class="verify-step-node ${p.isVerified ? 'active' : ''}"><span class="verify-step-num">03</span><span>立即通过</span></div>
+          </div>
+          <div style="padding:1rem;display:flex;flex-direction:column;gap:0.875rem;">
+            ${p.isVerified ? `
+              <div class="course-card-surface" style="margin:0;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <span class="status-dot verified" style="width:0.625rem;height:0.625rem;"></span>
+                  <strong style="font-size:1rem;">已完成央美校园身份认证</strong>
+                </div>
+                <p style="margin:0;font-size:0.8125rem;line-height:1.55;color:var(--ink-secondary);">
+                  当前身份：${esc(p.identityType)} · 社区内始终仅展示你的独立匿名形象「${esc(p.nickname)}」。
+                </p>
+                <div style="display:flex;gap:0.625rem;">
+                  <button class="btn-primary-full" style="flex:1;" data-action="goBack">进入树窝</button>
+                  <button class="btn-outline-full" style="flex:1;" data-action="resetVerifyDemo">重新演示认证</button>
+                </div>
+              </div>
+            ` : `
+              <div class="course-card-surface" style="margin:0;">
+                <div style="font-size:0.9375rem;font-weight:700;">选择你的央美身份</div>
+                <div style="display:flex;gap:0.625rem;">
+                  <button class="mono-chip ${selType === '在读学生' ? 'inverted' : ''}" style="flex:1;justify-content:center;padding:0.75rem;" data-action="verifyPickType" data-val="在读学生">在读学生</button>
+                  <button class="mono-chip ${selType === '毕业校友' ? 'inverted' : ''}" style="flex:1;justify-content:center;padding:0.75rem;" data-action="verifyPickType" data-val="毕业校友">毕业校友</button>
+                </div>
+                <div style="font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">
+                  支持学生证、校园一卡通、录取通知书或毕业证书照片，上传后自动完成核验并脱敏销毁。
+                </div>
+                <label class="btn-primary-full" style="cursor:pointer;">
+                  <span>上传央美证件照片 / 立即认证</span>
+                  <input type="file" accept="image/*" id="verify-file-input" style="display:none;" />
+                </label>
+                <button class="btn-outline-full" data-action="completeVerification">快速模拟认证通过（体验用）</button>
+              </div>
+            `}
+          </div>
         </div>
       </div>
     `;
@@ -1546,29 +1975,40 @@
     const { type, data } = nav.modal;
 
     if (type === 'personaEditor') {
+      const nickLen = (data.nickname || '').trim().length;
       return `
         <div class="sheet-backdrop" data-action="closeModalBackdrop">
           <div class="sheet-panel">
             <div class="sheet-handle"></div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <h2 style="margin:0;font-size:1.125rem;">自定义昵称与匿名形象</h2>
+              <h2 style="margin:0;font-size:1.125rem;font-weight:700;">自定义昵称与形象</h2>
               <button class="icon-btn-48" style="width:2.25rem;height:2.25rem;" data-action="closeModal">${ICONS.close}</button>
             </div>
-            <div style="display:flex;align-items:center;gap:0.875rem;padding:0.75rem;border-radius:0.875rem;background:var(--surface-soft);">
-              ${avatarHtml(data.seed, 'avatar-52')}
+            <div class="persona-preview-strip">
+              ${avatarHtml(data.seed, 'avatar-66')}
               <div style="min-width:0;flex:1;">
-                <div style="font-size:0.75rem;color:var(--ink-secondary);">预览形象</div>
-                <div style="font-size:1.0625rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(data.nickname || '未命名')}</div>
+                <div style="font-size:0.6875rem;font-weight:600;color:var(--active-tint);">实时预览</div>
+                <div style="font-size:1rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:0.15rem;">${esc(data.nickname || '请输入你的匿名昵称')}</div>
+                <div style="font-size:0.6875rem;color:var(--ink-secondary);margin-top:0.15rem;">形象编号 #${Math.abs(data.seed) % 10000}</div>
+              </div>
+              <button class="btn-aurora-outline-sm" style="gap:0.25rem;" data-action="rollPersonaBoth">
+                <span style="width:0.875rem;height:0.875rem;display:flex;">${ICONS.sparkle}</span><span>随机一套</span>
+              </button>
+            </div>
+            <div>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4375rem;">
+                <span style="font-size:0.875rem;font-weight:700;">修改匿名昵称</span>
+                <span style="font-size:0.75rem;color:${nickLen >= 2 && nickLen <= 16 ? 'var(--ink-secondary)' : 'var(--vermilion)'};">${nickLen} / 16</span>
+              </div>
+              <div style="display:flex;gap:0.5rem;align-items:center;">
+                <input class="field-input" id="persona-nick-input" maxlength="16" value="${esc(data.nickname)}" placeholder="输入 2~16 字自定义昵称" />
+                <button class="icon-btn-48" style="border-radius:0.75rem;background:var(--surface-soft);color:var(--active-tint);flex-shrink:0;" data-action="rollSingleNick" aria-label="随机抽取昵称">${ICONS.sparkle}</button>
               </div>
             </div>
             <div>
-              <div style="font-size:0.8125rem;font-weight:600;margin-bottom:0.375rem;">自定义昵称（2-16字）</div>
-              <input class="field-input" id="persona-nick-input" maxlength="16" value="${esc(data.nickname)}" placeholder="输入你喜欢的匿名昵称..." />
-            </div>
-            <div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-                <span style="font-size:0.8125rem;font-weight:600;">灵感昵称推荐</span>
-                <button style="font-size:0.75rem;color:var(--active-tint);display:inline-flex;align-items:center;gap:0.25rem;" data-action="refreshNickBatch">
+                <span style="font-size:0.75rem;color:var(--ink-secondary);">词库不重复灵感推荐</span>
+                <button style="font-size:0.75rem;color:var(--active-tint);font-weight:600;display:inline-flex;align-items:center;gap:0.25rem;" data-action="refreshNickBatch">
                   <span style="width:0.875rem;height:0.875rem;display:flex;">${ICONS.refresh}</span>换一批
                 </button>
               </div>
@@ -1576,10 +2016,11 @@
                 ${data.batch.map(n => `<button class="mono-chip ${data.nickname === n ? 'inverted' : ''}" data-action="pickNick" data-nick="${esc(n)}">${esc(n)}</button>`).join('')}
               </div>
             </div>
+            <div class="hairline"></div>
             <div>
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-                <span style="font-size:0.8125rem;font-weight:600;">选择匿名形象</span>
-                <button style="font-size:0.75rem;color:var(--active-tint);display:inline-flex;align-items:center;gap:0.25rem;" data-action="refreshAvatarBatch">
+                <span style="font-size:0.875rem;font-weight:700;">更换匿名形象</span>
+                <button style="font-size:0.75rem;color:var(--active-tint);font-weight:600;display:inline-flex;align-items:center;gap:0.25rem;" data-action="refreshAvatarBatch">
                   <span style="width:0.875rem;height:0.875rem;display:flex;">${ICONS.refresh}</span>换一批形象
                 </button>
               </div>
@@ -1587,31 +2028,37 @@
                 ${data.seeds.map(sd => `
                   <button class="avatar-pick-item ${data.seed === sd ? 'selected' : ''}" data-action="pickAvatarSeed" data-seed="${sd}">
                     ${avatarHtml(sd, 'avatar-40')}
+                    ${data.seed === sd ? '<span class="avatar-pick-check">✓</span>' : ''}
                   </button>
                 `).join('')}
               </div>
             </div>
-            <button class="btn-primary-full" data-action="savePersona">保存匿名形象</button>
+            <button class="btn-primary-full" data-action="savePersona">保存昵称与形象</button>
           </div>
         </div>
       `;
     }
 
     if (type === 'publish') {
-      const pubCats = ['ART_CREATION', 'EXHIBITION', 'MARKETPLACE', 'MUTUAL_AID', 'LOST_FOUND', 'RELATIONSHIP', 'TREE_HOLE'];
+      const pubCats = ['TREE_HOLE', 'MARKETPLACE', 'OPPORTUNITY', 'LOST_FOUND', 'MUTUAL_AID', 'EXHIBITION', 'ART_CREATION'];
       return `
         <div class="sheet-backdrop" data-action="closeModalBackdrop">
           <div class="sheet-panel">
             <div class="sheet-handle"></div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <h2 style="margin:0;font-size:1.125rem;">写下你的想法。</h2>
+              <div style="display:flex;align-items:center;gap:0.5rem;">
+                ${avatarHtml(state.persona.avatarSeed, 'avatar-32')}
+                <div>
+                  <div style="font-size:0.9375rem;font-weight:700;">${esc((D.CATEGORIES[data.category] || D.CATEGORIES.TREE_HOLE).titleCn)}</div>
+                  <div style="font-size:0.6875rem;color:var(--ink-secondary);">${esc(state.persona.nickname)}</div>
+                </div>
+              </div>
               <button class="icon-btn-48" style="width:2.25rem;height:2.25rem;" data-action="closeModal">${ICONS.close}</button>
             </div>
             <div class="chip-wrap">
               ${pubCats.map(k => `<button class="mono-chip ${data.category === k ? 'inverted' : ''}" data-action="pubPickCat" data-val="${k}">${D.CATEGORIES[k].titleCn}</button>`).join('')}
             </div>
-            <input class="field-input" id="pub-title" placeholder="标题（选填，树洞可不填）" value="${esc(data.title || '')}" />
-            <textarea class="field-textarea" id="pub-body" placeholder="分享此刻在花家地、燕郊或上海校区的想法、作品或互助信息...">${esc(data.body || '')}</textarea>
+            <textarea class="field-textarea" id="pub-body" style="min-height:7rem;" placeholder="直接写下此刻的想法、作品进展或求助，无需标题...">${esc(data.body || '')}</textarea>
             ${data.category === 'MARKETPLACE' ? `<input class="field-input" id="pub-price" placeholder="价格（如 ¥ 120）" value="${esc(data.price || '')}" />` : ''}
             <div>
               <div style="font-size:0.75rem;color:var(--ink-secondary);margin-bottom:0.375rem;">快捷地点</div>
@@ -1627,28 +2074,38 @@
             </div>
             <div style="display:flex;gap:0.625rem;">
               <button class="btn-outline-full" style="flex:1;" data-action="saveDraft">存草稿</button>
-              <button class="btn-primary-full" style="flex:1.6;" data-action="submitPost">立即发布</button>
+              <button class="btn-primary-full" style="flex:1.6;" data-action="submitPost">发布</button>
             </div>
           </div>
         </div>
       `;
     }
 
-    if (type === 'verification') {
+    if (type === 'createSenior') {
+      const cohorts = ['2026届', '2025届', '2024届', '2023届', '2022届及以前'];
+      const expCats = ['留学', '毕业作品', '考研', '就业', '工作室'];
       return `
         <div class="sheet-backdrop" data-action="closeModalBackdrop">
           <div class="sheet-panel">
             <div class="sheet-handle"></div>
-            <h2 style="margin:0;font-size:1.125rem;">中央美术学院校园身份认证</h2>
-            <p style="margin:0;font-size:0.8125rem;line-height:1.55;color:var(--ink-secondary);">
-              实名核验资料仅用于确认央美在读或校友身份，社区内始终仅展示你的独立匿名形象。
-            </p>
-            <div style="display:flex;gap:0.625rem;">
-              <button class="mono-chip ${data.identityType === '在读学生' ? 'inverted' : ''}" style="flex:1;justify-content:center;padding:0.625rem;" data-action="verifyPickType" data-val="在读学生">在读学生</button>
-              <button class="mono-chip ${data.identityType === '毕业校友' ? 'inverted' : ''}" style="flex:1;justify-content:center;padding:0.625rem;" data-action="verifyPickType" data-val="毕业校友">毕业校友</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <h2 style="margin:0;font-size:1.125rem;font-weight:700;">在学长学姐说发帖</h2>
+              <button class="icon-btn-48" style="width:2.25rem;height:2.25rem;" data-action="closeModal">${ICONS.close}</button>
             </div>
-            <input class="field-input" id="verify-college-input" placeholder="学院 / 专业（如 设计学院 · 视觉传达）" value="${esc(data.college || '设计学院')}" />
-            <button class="btn-primary-full" data-action="completeVerification">确认完成校园认证</button>
+            <div>
+              <div style="font-size:0.8125rem;font-weight:600;margin-bottom:0.4375rem;">你是哪一届的（必填）</div>
+              <div class="chip-wrap">
+                ${cohorts.map(ch => `<button class="mono-chip ${data.cohort === ch ? 'inverted' : ''}" data-action="expPickCohort" data-val="${ch}">${ch}</button>`).join('')}
+              </div>
+            </div>
+            <div>
+              <div style="font-size:0.8125rem;font-weight:600;margin-bottom:0.4375rem;">主题分类</div>
+              <div class="chip-wrap">
+                ${expCats.map(ct => `<button class="mono-chip ${data.category === ct ? 'inverted' : ''}" data-action="expPickCat" data-val="${ct}">${ct}</button>`).join('')}
+              </div>
+            </div>
+            <textarea class="field-textarea" id="exp-compose-body" style="min-height:7rem;" placeholder="分享你的考研、留学、毕设或工作室避坑经验，帮助后来的央美同学...">${esc(data.body || '')}</textarea>
+            <button class="btn-primary-full" data-action="submitSeniorExp">发布经验</button>
           </div>
         </div>
       `;
@@ -1731,9 +2188,9 @@
     if (isSub) {
       navWrap.classList.add('hidden');
       const top = nav.stack[nav.stack.length - 1];
-      if (top && top.name === 'categoryFeed') {
+      if (top && (top.name === 'categoryFeed' || top.name === 'seniorExperience')) {
         fab.classList.remove('hidden');
-        fab.style.bottom = 'calc(1.25rem + var(--sab))';
+        fab.style.bottom = 'calc(1.375rem + var(--sab))';
       } else {
         fab.classList.add('hidden');
       }
@@ -1861,6 +2318,7 @@
       else if (top.name === 'topicDetail') html = renderTopicDetailScreen(top.params.tag);
       else if (top.name === 'profileCollection') html = renderProfileCollectionScreen(top.params.colKey);
       else if (top.name === 'settings') html = renderSettingsScreen();
+      else if (top.name === 'verification') html = renderVerificationScreen();
     } else {
       if (nav.activeTab === 'home') html = renderHomeScreen();
       else if (nav.activeTab === 'discover') html = renderDiscoverScreen();
@@ -1901,6 +2359,25 @@
         render();
         const next = document.getElementById('global-search-input');
         if (next) { next.focus(); next.setSelectionRange(pos, pos); }
+      });
+      globalSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          triggerAiStats(nav.searchQuery);
+        }
+      });
+    }
+
+    const verifyFileInput = document.getElementById('verify-file-input');
+    if (verifyFileInput) {
+      verifyFileInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+          state.persona.identityType = nav.verifyDraftType || state.persona.identityType || '在读学生';
+          state.persona.isVerified = true;
+          saveState();
+          render();
+          showToast('已核验央美身份凭证，认证通过');
+        }
       });
     }
 
@@ -2034,8 +2511,47 @@
         return;
       }
 
+      if (act === 'clearSearch') {
+        nav.searchQuery = '';
+        nav.searchScope = 'ALL';
+        render();
+        return;
+      }
+
+      if (act === 'searchScope') {
+        nav.searchScope = actionEl.getAttribute('data-val');
+        render();
+        return;
+      }
+
+      if (act === 'runAiSearch') {
+        triggerAiStats(nav.searchQuery);
+        return;
+      }
+
+      if (act === 'quickAiPrompt') {
+        const promptQ = actionEl.getAttribute('data-q') || '';
+        nav.searchQuery = promptQ;
+        const top = nav.stack[nav.stack.length - 1];
+        if (!top || top.name !== 'search') {
+          nav.stack.push({ name: 'search', params: {} });
+        }
+        triggerAiStats(promptQ);
+        return;
+      }
+
       if (act === 'quickSearch') {
         nav.searchQuery = actionEl.getAttribute('data-q');
+        render();
+        return;
+      }
+
+      if (act === 'openPublishWithTag') {
+        const tg = actionEl.getAttribute('data-tag');
+        nav.modal = {
+          type: 'publish',
+          data: { category: 'TREE_HOLE', title: '', body: '', price: '', location: '', tags: tg ? [tg] : [] }
+        };
         render();
         return;
       }
@@ -2193,6 +2709,45 @@
         if (ex) { ex.isBookmarked = !ex.isBookmarked; ex.bookmarkCount += ex.isBookmarked ? 1 : -1; saveState(); render(); showToast(ex.isBookmarked ? '已收藏经验' : '已取消收藏'); }
         return;
       }
+      if (act === 'expPickCohort') {
+        nav.modal.data.body = document.getElementById('exp-compose-body')?.value || '';
+        nav.modal.data.cohort = actionEl.getAttribute('data-val');
+        render();
+        return;
+      }
+      if (act === 'expPickCat') {
+        nav.modal.data.body = document.getElementById('exp-compose-body')?.value || '';
+        nav.modal.data.category = actionEl.getAttribute('data-val');
+        render();
+        return;
+      }
+      if (act === 'submitSeniorExp') {
+        const body = (document.getElementById('exp-compose-body')?.value || '').trim();
+        if (!body) { showToast('请先写下你的经验分享'); return; }
+        const firstLine = body.split('\n')[0].slice(0, 26);
+        state.experiences.unshift({
+          id: 'exp_' + Date.now(),
+          category: nav.modal.data.category || '留学',
+          title: firstLine,
+          summary: body.slice(0, 68),
+          body,
+          author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+          college: '中央美术学院',
+          major: nav.modal.data.category || '经验分享',
+          year: nav.modal.data.cohort || '2024届',
+          readMinutes: Math.max(1, Math.ceil(body.length / 280)),
+          likeCount: 1,
+          bookmarkCount: 0,
+          isBookmarked: false,
+          tags: [nav.modal.data.category || '经验', nav.modal.data.cohort || '2024届'],
+          comments: []
+        });
+        saveState();
+        nav.modal = null;
+        render();
+        showToast('经验已发布到学长学姐说');
+        return;
+      }
 
       // Messages
       if (act === 'msgFilter') { state.msgFilter = actionEl.getAttribute('data-key'); render(); return; }
@@ -2255,6 +2810,21 @@
         render();
         return;
       }
+      if (act === 'rollSingleNick') {
+        const used = new Set(state.posts.map(p => p.author.nickname));
+        used.add(nav.modal.data.nickname);
+        nav.modal.data.nickname = D.nextUniqueNickname(used);
+        render();
+        return;
+      }
+      if (act === 'rollPersonaBoth') {
+        const used = new Set(state.posts.map(p => p.author.nickname));
+        used.add(nav.modal.data.nickname);
+        nav.modal.data.nickname = D.nextUniqueNickname(used);
+        nav.modal.data.seed = D.sampleDistinctAvatarSeeds(1, nav.modal.data.seed)[0];
+        render();
+        return;
+      }
       if (act === 'savePersona') {
         const nick = (nav.modal.data.nickname || '').trim();
         if (nick.length < 2) { showToast('昵称至少 2 个字'); return; }
@@ -2268,16 +2838,15 @@
       }
 
       if (act === 'openVerification') {
-        nav.modal = { type: 'verification', data: { identityType: state.persona.identityType || '在读学生', college: '设计学院' } };
-        render();
+        nav.verifyDraftType = state.persona.identityType || '在读学生';
+        pushScreen('verification');
         return;
       }
-      if (act === 'verifyPickType') { nav.modal.data.identityType = actionEl.getAttribute('data-val'); render(); return; }
+      if (act === 'verifyPickType') { nav.verifyDraftType = actionEl.getAttribute('data-val'); render(); return; }
       if (act === 'completeVerification') {
-        state.persona.identityType = nav.modal.data.identityType;
+        state.persona.identityType = nav.verifyDraftType || state.persona.identityType || '在读学生';
         state.persona.isVerified = true;
         saveState();
-        nav.modal = null;
         render();
         showToast('已完成央美校园身份认证');
         return;
@@ -2295,8 +2864,8 @@
         const k = actionEl.getAttribute('data-key');
         if (k === 'SETTINGS') pushScreen('settings');
         else if (k === 'VERIFY') {
-          nav.modal = { type: 'verification', data: { identityType: state.persona.identityType || '在读学生', college: '设计学院' } };
-          render();
+          nav.verifyDraftType = state.persona.identityType || '在读学生';
+          pushScreen('verification');
         } else pushScreen('profileCollection', { colKey: k });
         return;
       }
@@ -2453,7 +3022,12 @@
       fab.innerHTML = ICONS.plus;
       fab.addEventListener('click', () => {
         const top = nav.stack[nav.stack.length - 1];
-        const cat = (top && top.name === 'categoryFeed') ? top.params.catKey : 'ART_CREATION';
+        if (top && top.name === 'seniorExperience') {
+          nav.modal = { type: 'createSenior', data: { cohort: '2024届', category: '留学', body: '' } };
+          render();
+          return;
+        }
+        const cat = (top && top.name === 'categoryFeed') ? top.params.catKey : 'TREE_HOLE';
         openPublishModal(cat);
       });
     }
