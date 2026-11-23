@@ -59,6 +59,7 @@ class YangmeiRepository(
         val ALLOW_ANON_NOTES = booleanPreferencesKey("allow_anon_notes")
         val BLOCKED_USERS = stringPreferencesKey("blocked_users")
         val BLOCKED_KEYWORDS = stringPreferencesKey("blocked_keywords")
+        val LAST_HOT_TOPICS_DATE = stringPreferencesKey("last_hot_topics_date")
     }
 
     private val _posts = MutableStateFlow(MockSeedData.initialPosts)
@@ -166,6 +167,90 @@ class YangmeiRepository(
             blockedUsers = blockedUsers,
             blockedKeywords = blockedKeywords
         )
+    }
+
+    suspend fun refreshDailyHotTopics(dayKey: String) {
+        recalculateHotTopicsForDay(dayKey)
+        context.yangmeiDataStore.edit { prefs ->
+            prefs[Keys.LAST_HOT_TOPICS_DATE] = dayKey
+        }
+    }
+
+    fun recalculateHotTopicsForDay(dayKey: String) {
+        val currentPosts = _posts.value
+        val existingByTag = LinkedHashMap<String, HotTopic>()
+        MockSeedData.initialHotTopics.forEach { t ->
+            existingByTag[t.tag.lowercase()] = t
+        }
+        _hotTopics.value.forEach { t ->
+            val key = t.tag.lowercase()
+            if (!existingByTag.containsKey(key)) {
+                existingByTag[key] = t
+            }
+        }
+        // Discover any tags present in user posts that are not yet in the map
+        currentPosts.flatMap { it.topicTags }
+            .map { if (it.startsWith("#")) it else "#$it" }
+            .distinctBy { it.lowercase() }
+            .forEachIndexed { idx, tag ->
+                val key = tag.lowercase()
+                if (!existingByTag.containsKey(key)) {
+                    existingByTag[key] = HotTopic(
+                        id = "topic_live_${tag.hashCode()}_$idx",
+                        indexCode = "TAG",
+                        tag = tag,
+                        subtitleEn = "CAMPUS TAG",
+                        description = "央美同学正在热议的校园话题",
+                        postCount = 0,
+                        discussionCount = 0,
+                        heatStatus = "新"
+                    )
+                }
+            }
+
+        val scored = existingByTag.values.map { topic ->
+            val rawTag = topic.tag.removePrefix("#")
+            val matching = currentPosts.filter { post ->
+                post.topicTags.any { it.equals(topic.tag, ignoreCase = true) } ||
+                    post.body.contains(rawTag, ignoreCase = true) ||
+                    post.title.contains(rawTag, ignoreCase = true)
+            }
+            val liveEngagement = matching.sumOf { post ->
+                68 + post.likeCount * 4 + post.comments.size * 12 + post.bookmarkCount * 5 + (post.viewCount / 12) +
+                    if (post.isMine) 140 else 0
+            }
+            // Deterministic daily shift keyed by local calendar date (YYYY-MM-DD)
+            val dailySeed = "${topic.id}|$dayKey".hashCode()
+            val normShift = ((dailySeed and 0x7FFFFFFF) % 420) - 180 // -180..+239 daily wave
+            val baseHeat = MockSeedData.initialHotTopics.firstOrNull { it.id == topic.id }?.discussionCount ?: 120
+            val dailyHeat = (baseHeat + liveEngagement + normShift).coerceAtLeast(36)
+            val isCustomNew = MockSeedData.initialHotTopics.none { it.id == topic.id }
+
+            Triple(
+                topic.copy(
+                    postCount = (topic.postCount.coerceAtLeast(matching.size) + matching.count { it.isMine }),
+                    discussionCount = dailyHeat
+                ),
+                isCustomNew,
+                normShift
+            )
+        }.sortedByDescending { it.first.discussionCount }
+
+        val topRiserId = scored.maxByOrNull { it.third }?.first?.id
+        val ranked = scored.mapIndexed { idx, (topic, isCustomNew, _) ->
+            val status = when {
+                idx == 0 -> "沸"
+                idx == 1 || idx == 2 -> "热"
+                isCustomNew || topic.id == topRiserId -> "新"
+                idx == 4 -> "荐"
+                else -> ""
+            }
+            topic.copy(
+                indexCode = "NO.%02d".format(idx + 1),
+                heatStatus = status
+            )
+        }
+        _hotTopics.value = ranked
     }
 
     override suspend fun submitVerification(record: VerificationRecord) {

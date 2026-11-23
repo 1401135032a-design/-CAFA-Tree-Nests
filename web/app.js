@@ -5,7 +5,7 @@
   'use strict';
 
   const D = window.YANGMEI_DATA;
-  const STORAGE_KEY = 'yangmei_tree_web_state_v2';
+  const STORAGE_KEY = 'yangmei_tree_web_state_v3';
 
   // ---------------- Security: Strict HTML Escaping ----------------
   function esc(str) {
@@ -69,7 +69,14 @@
     spa: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 20c5 0 8-4 8-10-4 0-7 2-8 5-1-3-4-5-8-5 0 6 3 10 8 10z"/><path d="M12 15c1.5-3 2-6 0-11-2 5-1.5 8 0 11z"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01" stroke-linecap="round"/></svg>',
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>',
-    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>'
+    close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+    badge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="12" r="2.2"/><path d="M14 10h4M14 14h3" stroke-linecap="round"/></svg>',
+    school: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M2 9l10-5 10 5-10 5-10-5z"/><path d="M6 11v5c0 1.8 2.7 3 6 3s6-1.2 6-3v-5"/><path d="M22 9v6" stroke-linecap="round"/></svg>',
+    camera: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M4 7h3l2-2h6l2 2h3a1.5 1.5 0 0 1 1.5 1.5v10A1.5 1.5 0 0 1 20 20H4a1.5 1.5 0 0 1-1.5-1.5v-10A1.5 1.5 0 0 1 4 7z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+    photo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-4.5-4.5L7 20"/></svg>',
+    checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.3 2.3 4.8-5.2"/></svg>',
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>'
   };
 
   function catIcon(key) {
@@ -415,7 +422,15 @@
         nickname: '美术馆北窗光',
         avatarSeed: 1091,
         identityType: '在读学生',
-        isVerified: true
+        isVerified: false
+      },
+      verificationStatus: 'UNVERIFIED', // UNVERIFIED | REVIEWING | VERIFIED | REJECTED
+      verificationRecord: {
+        identityType: '在读学生',
+        proofType: '学生证',
+        proofLabel: '',
+        proofDataUrl: '',
+        rejectReason: ''
       },
       darkTheme: false,
       homeTab: 'RECOMMENDED',
@@ -424,6 +439,7 @@
       courses: clone(D.INITIAL_COURSES),
       experiences: clone(D.INITIAL_EXPERIENCES),
       hotTopics: clone(D.INITIAL_HOT_TOPICS),
+      hotTopicsDate: '',
       notifications: [],
       drafts: [],
       settings: {
@@ -441,7 +457,13 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return defaultState();
       const parsed = JSON.parse(raw);
-      return Object.assign(defaultState(), parsed);
+      const merged = Object.assign(defaultState(), parsed);
+      merged.persona = Object.assign(defaultState().persona, parsed.persona || {});
+      merged.verificationRecord = Object.assign(defaultState().verificationRecord, parsed.verificationRecord || {});
+      if (merged.verificationStatus !== 'VERIFIED') {
+        merged.persona.isVerified = false;
+      }
+      return merged;
     } catch (e) {
       return defaultState();
     }
@@ -452,6 +474,104 @@
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) { /* ignore quota */ }
+  }
+
+  // ---------------- Silent Daily 00:00 Hot Topics Engine ----------------
+  function getLocalDayKey() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function strHash(str) {
+    let h = 0;
+    for (let i = 0; i < str.length; i++) {
+      h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h);
+  }
+
+  function recalculateHotTopicsForDay(dayKey) {
+    const keyDay = dayKey || getLocalDayKey();
+    const baseByTag = new Map();
+    D.INITIAL_HOT_TOPICS.forEach(t => baseByTag.set(t.tag.toLowerCase(), clone(t)));
+    (state.hotTopics || []).forEach(t => {
+      const k = t.tag.toLowerCase();
+      if (!baseByTag.has(k)) baseByTag.set(k, clone(t));
+    });
+    (state.posts || []).forEach(post => {
+      (post.topicTags || []).forEach(rawT => {
+        const tag = rawT.startsWith('#') ? rawT : '#' + rawT;
+        const k = tag.toLowerCase();
+        if (!baseByTag.has(k)) {
+          baseByTag.set(k, {
+            id: 'topic_live_' + strHash(k),
+            tag,
+            description: '央美同学正在热议的校园话题',
+            discussionCount: 120,
+            heatStatus: '新'
+          });
+        }
+      });
+    });
+
+    const scored = Array.from(baseByTag.values()).map(topic => {
+      const clean = topic.tag.replace(/^#/, '').toLowerCase();
+      const matching = (state.posts || []).filter(p =>
+        (p.topicTags || []).some(t => t.toLowerCase() === topic.tag.toLowerCase()) ||
+        (p.body || '').toLowerCase().includes(clean) ||
+        (p.title || '').toLowerCase().includes(clean)
+      );
+      const liveEngagement = matching.reduce((acc, p) =>
+        acc + 68 + (p.likeCount || 0) * 4 + ((p.comments || []).length * 12) +
+        (p.bookmarkCount || 0) * 5 + Math.floor((p.viewCount || 0) / 12) + (p.isMine ? 140 : 0),
+        0
+      );
+      const normShift = (strHash(topic.id + '|' + keyDay) % 420) - 180;
+      const baseOrigin = D.INITIAL_HOT_TOPICS.find(x => x.id === topic.id);
+      const baseHeat = baseOrigin ? baseOrigin.discussionCount : 120;
+      const dailyHeat = Math.max(36, baseHeat + liveEngagement + normShift);
+      return {
+        topic: Object.assign({}, topic, { discussionCount: dailyHeat }),
+        isCustomNew: !baseOrigin,
+        shift: normShift
+      };
+    }).sort((a, b) => b.topic.discussionCount - a.topic.discussionCount);
+
+    let topRiserId = '';
+    let maxShift = -9999;
+    scored.forEach(item => {
+      if (item.shift > maxShift) {
+        maxShift = item.shift;
+        topRiserId = item.topic.id;
+      }
+    });
+
+    state.hotTopics = scored.map((item, idx) => {
+      let status = '';
+      if (idx === 0) status = '沸';
+      else if (idx === 1 || idx === 2) status = '热';
+      else if (item.isCustomNew || item.topic.id === topRiserId) status = '新';
+      else if (idx === 4) status = '荐';
+      return Object.assign({}, item.topic, { heatStatus: status });
+    });
+    state.hotTopicsDate = keyDay;
+    saveState();
+  }
+
+  let midnightTimer = null;
+  function scheduleSilentMidnightHotTopics() {
+    clearTimeout(midnightTimer);
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0);
+    const delayMs = Math.max(1000, nextMidnight.getTime() - now.getTime());
+    midnightTimer = setTimeout(() => {
+      recalculateHotTopicsForDay(getLocalDayKey());
+      render();
+      scheduleSilentMidnightHotTopics();
+    }, delayMs);
   }
 
   // Runtime Navigation & Transient UI State
@@ -466,10 +586,30 @@
     searchScope: 'ALL', // ALL | POSTS | COURSES | EXPERIENCES
     aiStats: { status: 'idle', queryKey: '', report: null },
     aiTimer: null,
+    verifyDraft: {
+      identityType: '在读学生',
+      proofType: '学生证',
+      proofLabel: '',
+      proofDataUrl: '',
+      agreedPolicy: false
+    },
+    verifyAuditStep: 0,
+    verifyAuditTimers: [],
+    pubDraft: null,
     modal: null,       // null | { type, data }
     marqueeRaf: null,
     marqueePaused: false
   };
+
+  function requireVerified(actionLabel, onAllowed) {
+    if (state.persona && state.persona.isVerified && state.verificationStatus === 'VERIFIED') {
+      if (typeof onAllowed === 'function') onAllowed();
+      return true;
+    }
+    nav.modal = { type: 'verificationGate', data: { actionLabel: actionLabel || '参与社区互动' } };
+    render();
+    return false;
+  }
 
   function applyTheme() {
     document.documentElement.classList.toggle('dark', !!state.darkTheme);
@@ -1634,7 +1774,6 @@
               <span style="width:1.125rem;height:1.125rem;color:var(--vermilion);display:flex;">${ICONS.fire}</span>
               <span style="font-size:1rem;font-weight:700;color:var(--ink);">央美热搜榜</span>
             </div>
-            <span style="font-size:0.75rem;color:var(--ink-secondary);">实时更新</span>
           </div>
 
           ${renderHotSearchBoardCard(rankedTopics)}
@@ -1737,7 +1876,6 @@
               <h1 class="sub-topbar-title">央美热搜榜</h1>
             </div>
           </div>
-          <span style="font-size:0.75rem;color:var(--ink-secondary);padding-right:0.75rem;">实时更新</span>
         </div>
         <div class="scroll-area sub-scroll">
           <div style="display:flex;flex-direction:column;gap:0.75rem;padding-top:0.25rem;">
@@ -1782,9 +1920,214 @@
   }
 
   // ---------------- Sub-Screen: VERIFICATION (央美身份认证 — 1:1 VerificationScreen.kt) ----------------
+  function getProofTypeOptions(idType) {
+    return idType === '毕业校友'
+      ? ['毕业证书', '学位证书', '校友卡', '学生证留存']
+      : ['学生证', '校园一卡通', '录取通知书', '教务系统截图'];
+  }
+
   function renderVerificationScreen() {
     const p = state.persona;
-    const selType = nav.verifyDraftType || p.identityType || '在读学生';
+    const status = state.verificationStatus || (p.isVerified ? 'VERIFIED' : 'UNVERIFIED');
+
+    // 1:1 VerificationSuccessScreen
+    if (status === 'VERIFIED' && p.isVerified) {
+      return `
+        <div class="screen-container">
+          <div class="scroll-area sub-scroll" style="padding:0;display:flex;flex-direction:column;justify-content:space-between;">
+            <div class="verify-success-hero fluid-aurora-dark" style="padding-top:calc(1.5rem + var(--sat));">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:0.875rem;font-weight:600;color:rgba(255,255,255,0.9);">央美身份核验通过</span>
+                <span class="status-dot verified" style="width:0.625rem;height:0.625rem;"></span>
+              </div>
+              <div>
+                <h2 style="margin:0;font-size:2rem;line-height:1.22;font-weight:800;color:#FFFFFF;">欢迎回到<br/>杨梅树下。</h2>
+                <p style="margin:0.625rem 0 0;font-size:0.875rem;line-height:1.55;color:rgba(255,255,255,0.82);">
+                  你的中央美术学院${esc(p.identityType)}身份已确认。接下来你将以独立匿名形象自由交流。
+                </p>
+              </div>
+              <div class="verify-frosted-card">
+                ${avatarHtml(p.avatarSeed, 'avatar-52')}
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:0.6875rem;color:rgba(255,255,255,0.74);">匿名身份已激活</div>
+                  <div style="font-size:1.1875rem;font-weight:700;color:#FFFFFF;margin-top:0.125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(p.nickname)}</div>
+                  <div style="font-size:0.75rem;color:rgba(255,255,255,0.8);margin-top:0.125rem;">中央美术学院 · ${esc(p.identityType)}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:var(--surface);padding:1.5rem 1.5rem calc(1.75rem + var(--sab));display:flex;flex-direction:column;gap:0.75rem;">
+              <p style="margin:0;font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">
+                已解锁完整权限：发布帖子 · 匿名评论与回复 · 参与投票 · 选课评价共建
+              </p>
+              <button class="btn-primary-full" style="min-height:3.25rem;border-radius:0.875rem;" data-action="goBack">
+                <span>进入杨梅树窝</span>
+                <span style="width:1.125rem;height:1.125rem;display:flex;">${ICONS.arrowRight}</span>
+              </button>
+              <button style="font-size:0.75rem;color:var(--ink-muted);padding:0.5rem;align-self:center;" data-action="resetVerifyDemo">
+                重置为未认证访客
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const d = nav.verifyDraft;
+    const statusLabel = status === 'REVIEWING' ? '审核中' : status === 'REJECTED' ? '未通过' : '未认证';
+    const proofOptions = getProofTypeOptions(d.identityType);
+    if (!proofOptions.includes(d.proofType)) d.proofType = proofOptions[0];
+    const hasPhoto = Boolean(d.proofDataUrl);
+    const canSubmit = hasPhoto && Boolean(d.agreedPolicy);
+
+    let bodySection = '';
+    if (status === 'REVIEWING') {
+      const step = Math.max(1, Math.min(3, nav.verifyAuditStep || 1));
+      const pct = step === 1 ? 34 : step === 2 ? 70 : 96;
+      const rec = state.verificationRecord || {};
+      bodySection = `
+        <div style="padding:1.125rem;">
+          <div class="pub-card" style="padding:1.25rem;gap:1rem;">
+            <div style="display:flex;align-items:center;gap:0.625rem;">
+              <span class="ai-spinner" style="width:1.25rem;height:1.25rem;flex-shrink:0;"></span>
+              <div>
+                <div style="font-size:1.125rem;font-weight:700;color:var(--ink);">身份核验中</div>
+                <div style="font-size:0.75rem;color:var(--ink-secondary);margin-top:0.1rem;">中央美术学院 · ${esc(rec.identityType || d.identityType)}</div>
+              </div>
+            </div>
+
+            <div class="verify-audit-progress-track">
+              <div class="verify-audit-progress-fill" style="width:${pct}%;"></div>
+            </div>
+
+            ${rec.proofDataUrl ? `
+              <div style="display:flex;align-items:center;gap:0.75rem;padding:0.625rem;border-radius:0.75rem;background:var(--surface-soft);">
+                <img class="verify-photo-thumb" style="width:3.25rem;height:3.25rem;" src="${rec.proofDataUrl}" alt="审核中凭证预览" />
+                <div style="min-width:0;flex:1;">
+                  <div style="font-size:0.875rem;font-weight:600;color:var(--ink);">${esc(rec.proofLabel || '央美身份凭证照片')}</div>
+                  <div style="font-size:0.6875rem;color:var(--ink-secondary);margin-top:0.1875rem;">凭证已加密隔离，核验完成后自动脱敏销毁</div>
+                </div>
+              </div>
+            ` : ''}
+
+            <div style="display:flex;flex-direction:column;gap:0.625rem;">
+              <div class="verify-audit-stage ${step > 1 ? 'done' : step === 1 ? 'active' : ''}">
+                <span class="verify-audit-dot">${step > 1 ? `<span style="width:0.75rem;height:0.75rem;display:flex;">${ICONS.check}</span>` : ''}</span>
+                <span>凭证图片清晰度与完整性校验</span>
+              </div>
+              <div class="verify-audit-stage ${step > 2 ? 'done' : step === 2 ? 'active' : ''}">
+                <span class="verify-audit-dot">${step > 2 ? `<span style="width:0.75rem;height:0.75rem;display:flex;">${ICONS.check}</span>` : ''}</span>
+                <span>中央美术学院（CAFA）本校标识核验</span>
+              </div>
+              <div class="verify-audit-stage ${step >= 3 ? 'active' : ''}">
+                <span class="verify-audit-dot"></span>
+                <span>生成隔离匿名社区身份并解锁权限</span>
+              </div>
+            </div>
+
+            <div class="hairline"></div>
+            <button class="btn-outline-full" data-action="cancelVerifyReview">撤回并重新上传凭证</button>
+          </div>
+        </div>
+      `;
+    } else {
+      bodySection = `
+        ${status === 'REJECTED' ? `
+          <div class="verify-rejected-banner">
+            <span style="width:1.125rem;height:1.125rem;color:var(--vermilion);display:flex;flex-shrink:0;">${ICONS.alert}</span>
+            <div>
+              <div style="font-size:0.875rem;font-weight:700;color:var(--vermilion);">上次认证未通过</div>
+              <div style="font-size:0.75rem;line-height:1.45;color:var(--ink);margin-top:0.2rem;">
+                ${esc((state.verificationRecord && state.verificationRecord.rejectReason) || '请重新上传能清晰辨认中央美术学院标识的证明。')}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        <div style="padding:1rem 1.125rem;display:flex;flex-direction:column;gap:0.625rem;">
+          <h3 class="verify-section-label">第一步 · 选择你的央美身份</h3>
+          <div class="identity-choice-grid">
+            <button class="identity-choice-card ${d.identityType === '在读学生' ? 'selected' : ''}" data-action="verifyPickType" data-val="在读学生">
+              <div class="identity-choice-top">
+                <span class="identity-choice-icon">${ICONS.badge}</span>
+                ${d.identityType === '在读学生' ? `<span style="width:1.125rem;height:1.125rem;display:flex;color:#FFFFFF;">${ICONS.checkCircle}</span>` : ''}
+              </div>
+              <div>
+                <div class="identity-choice-title">在读学生认证</div>
+                <div class="identity-choice-desc">学生证 / 一卡通 / 录取通知书</div>
+              </div>
+            </button>
+            <button class="identity-choice-card ${d.identityType === '毕业校友' ? 'selected' : ''}" data-action="verifyPickType" data-val="毕业校友">
+              <div class="identity-choice-top">
+                <span class="identity-choice-icon">${ICONS.school}</span>
+                ${d.identityType === '毕业校友' ? `<span style="width:1.125rem;height:1.125rem;display:flex;color:#FFFFFF;">${ICONS.checkCircle}</span>` : ''}
+              </div>
+              <div>
+                <div class="identity-choice-title">毕业校友认证</div>
+                <div class="identity-choice-desc">毕业证 / 学位证 / 校友凭证</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div style="padding:0 1.125rem 1.5rem;">
+          <div class="pub-card" style="padding:1.125rem;gap:0.875rem;">
+            <div class="verify-school-banner">
+              <div style="display:flex;align-items:center;gap:0.5rem;">
+                <span style="width:1.125rem;height:1.125rem;color:var(--active-tint);display:flex;">${ICONS.school}</span>
+                <span style="font-size:0.75rem;color:var(--ink-secondary);">认证院校</span>
+              </div>
+              <span style="font-size:0.875rem;font-weight:700;color:var(--ink);">中央美术学院（CAFA）</span>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:0.5rem;">
+              <div class="verify-section-label">第二步 · 选择凭证类型</div>
+              <div class="chip-wrap">
+                ${proofOptions.map(opt => `<button class="mono-chip ${d.proofType === opt ? 'inverted' : ''}" data-action="verifyPickProofType" data-val="${esc(opt)}">${esc(opt)}</button>`).join('')}
+              </div>
+            </div>
+
+            ${hasPhoto ? `
+              <button class="verify-photo-preview" data-action="openVerifyPhotoSheet">
+                <img class="verify-photo-thumb" src="${d.proofDataUrl}" alt="已选认证照片预览" />
+                <div style="min-width:0;flex:1;">
+                  <div style="display:flex;align-items:center;gap:0.3125rem;">
+                    <span style="width:1rem;height:1rem;color:#10B981;display:flex;flex-shrink:0;">${ICONS.checkCircle}</span>
+                    <span style="font-size:0.875rem;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(d.proofLabel || ('已选择「' + d.proofType + '」照片'))}</span>
+                  </div>
+                  <div style="font-size:0.6875rem;color:var(--ink-secondary);margin-top:0.2rem;">点击可重新拍照或从相册更换照片</div>
+                </div>
+              </button>
+            ` : `
+              <button class="verify-upload-zone" data-action="openVerifyPhotoSheet">
+                <span class="verify-upload-circle">${ICONS.camera}</span>
+                <div style="font-size:0.875rem;font-weight:700;color:var(--ink);">拍照或从相册上传「${esc(d.proofType)}」</div>
+                <div style="font-size:0.75rem;line-height:1.45;color:var(--ink-secondary);">需清晰可见中央美术学院（CAFA）校名或标识，姓名与学号可自行打码</div>
+              </button>
+            `}
+
+            <button class="verify-policy-row" data-action="verifyTogglePolicy">
+              <span class="verify-checkbox ${d.agreedPolicy ? 'checked' : ''}">
+                ${d.agreedPolicy ? ICONS.check : ''}
+              </span>
+              <span style="font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">
+                我确认上传的为本人中央美术学院有效身份凭证，同意仅用于本校边界核验，审核后原图将脱敏销毁且绝不公开展示。
+              </span>
+            </button>
+
+            <button class="btn-primary-full" style="min-height:3.25rem;border-radius:0.875rem;opacity:${canSubmit ? '1' : '0.52'};" data-action="submitVerification">
+              <span>${hasPhoto ? '提交认证审核' : '请先上传凭证照片'}</span>
+              <span style="width:1.125rem;height:1.125rem;display:flex;">${ICONS.arrowRight}</span>
+            </button>
+
+            <div style="font-size:0.6875rem;line-height:1.5;color:var(--ink-muted);">
+              未认证状态下仅支持浏览，完成核验后方可发帖、评论、投票及参与选课评价共建。
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     return `
       <div class="screen-container">
         <div class="sub-topbar">
@@ -1793,11 +2136,11 @@
             <h1 class="sub-topbar-title">央美身份认证</h1>
           </div>
         </div>
-        <div class="scroll-area sub-scroll">
+        <div class="scroll-area sub-scroll" style="padding:0;">
           <div class="verify-dark-hero fluid-aurora-dark">
             <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.75rem;color:rgba(255,255,255,0.82);">
               <span>中央美术学院 · CAFA</span>
-              <span>${p.isVerified ? '已认证' : '未认证'}</span>
+              <span>${statusLabel}</span>
             </div>
             <div>
               <h2 style="margin:0;font-size:1.5rem;font-weight:800;color:#FFFFFF;">确认央美身份</h2>
@@ -1807,43 +2150,365 @@
             </div>
           </div>
           <div class="verify-steps-strip">
-            <div class="verify-step-node active"><span class="verify-step-num">01</span><span>确认身份</span></div>
-            <div class="verify-step-node ${p.isVerified ? 'active' : ''}"><span class="verify-step-num">02</span><span>拍照/传图</span></div>
-            <div class="verify-step-node ${p.isVerified ? 'active' : ''}"><span class="verify-step-num">03</span><span>立即通过</span></div>
+            <div class="verify-step-node active"><span class="verify-step-num">01</span><span>选择身份</span></div>
+            <div class="verify-step-node ${hasPhoto || status !== 'UNVERIFIED' ? 'active' : ''}"><span class="verify-step-num">02</span><span>上传凭证</span></div>
+            <div class="verify-step-node ${status === 'REVIEWING' || status === 'VERIFIED' ? 'active' : ''}"><span class="verify-step-num">03</span><span>核验通过</span></div>
           </div>
-          <div style="padding:1rem;display:flex;flex-direction:column;gap:0.875rem;">
-            ${p.isVerified ? `
-              <div class="course-card-surface" style="margin:0;">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="status-dot verified" style="width:0.625rem;height:0.625rem;"></span>
-                  <strong style="font-size:1rem;">已完成央美校园身份认证</strong>
-                </div>
-                <p style="margin:0;font-size:0.8125rem;line-height:1.55;color:var(--ink-secondary);">
-                  当前身份：${esc(p.identityType)} · 社区内始终仅展示你的独立匿名形象「${esc(p.nickname)}」。
-                </p>
-                <div style="display:flex;gap:0.625rem;">
-                  <button class="btn-primary-full" style="flex:1;" data-action="goBack">进入树窝</button>
-                  <button class="btn-outline-full" style="flex:1;" data-action="resetVerifyDemo">重新演示认证</button>
-                </div>
-              </div>
-            ` : `
-              <div class="course-card-surface" style="margin:0;">
-                <div style="font-size:0.9375rem;font-weight:700;">选择你的央美身份</div>
-                <div style="display:flex;gap:0.625rem;">
-                  <button class="mono-chip ${selType === '在读学生' ? 'inverted' : ''}" style="flex:1;justify-content:center;padding:0.75rem;" data-action="verifyPickType" data-val="在读学生">在读学生</button>
-                  <button class="mono-chip ${selType === '毕业校友' ? 'inverted' : ''}" style="flex:1;justify-content:center;padding:0.75rem;" data-action="verifyPickType" data-val="毕业校友">毕业校友</button>
-                </div>
-                <div style="font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">
-                  支持学生证、校园一卡通、录取通知书或毕业证书照片，上传后自动完成核验并脱敏销毁。
-                </div>
-                <label class="btn-primary-full" style="cursor:pointer;">
-                  <span>上传央美证件照片 / 立即认证</span>
-                  <input type="file" accept="image/*" id="verify-file-input" style="display:none;" />
-                </label>
-                <button class="btn-outline-full" data-action="completeVerification">快速模拟认证通过（体验用）</button>
-              </div>
-            `}
+          ${bodySection}
+        </div>
+      </div>
+    `;
+  }
+
+  // ---------------- Sub-Screen: PARTITION-SPECIFIC PUBLISH SCREEN (1:1 PublishScreen.kt) ----------------
+  const PARTITION_SPECS = {
+    TREE_HOLE: {
+      headerTitle: '匿名树洞 · 安静倾诉',
+      headerHint: '在这里卸下防备，支持标记此刻情绪，可随时关闭评论仅留作自语',
+      placeholder: '在杨梅树下放心倾诉此刻的心情、压力或深夜想法，这里没人知道你是谁...',
+      mediaHint: '可附一张此刻看到的风景或随手涂鸦',
+      locationPrompt: '添加此刻所在位置（可选）',
+      curatedTags: ['#深夜树洞', '#情绪树洞', '#画室日常', '#花家地漫游', '#匿名倾诉'],
+      ctaLabel: '投递树洞'
+    },
+    MARKETPLACE: {
+      headerTitle: '闲置交换 · 校内流转',
+      headerHint: '填好分类、价格、成色与交接方式，方便央美同学快速定位并私信交换微信',
+      placeholder: '描述画材/物品品牌、规格、使用痕迹、购买渠道与校内面交安排...',
+      mediaHint: '建议附上 1~4 张实物实拍图，成交率更高',
+      locationPrompt: '面交 / 自提地点（如：望京北门 / 燕郊宿舍）',
+      curatedTags: ['#闲置画材', '#二手出物', '#教材流转', '#望京自提', '#燕郊自提'],
+      ctaLabel: '发布闲置'
+    },
+    OPPORTUNITY: {
+      headerTitle: '校园机会 · 兼职与协作',
+      headerHint: '清晰写明招募类型、报酬范围与技能要求，让合适专业的同学一眼看到',
+      placeholder: '说明岗位职责、技能要求（如手绘/3D/排版/布展/拍摄）、时间周期与联系投递方式...',
+      mediaHint: '可附项目海报、参考风格图或招募简章',
+      locationPrompt: '工作地点（如：望京周边 / 798 / 线上远程）',
+      curatedTags: ['#设计实习', '#艺术兼职', '#项目合作', '#展览助理', '#模特招募'],
+      ctaLabel: '发布招募'
+    },
+    LOST_FOUND: {
+      headerTitle: '失物招领 · 校园互助找回',
+      headerHint: '先选「失物寻找」或「拾物招领」，写明时间与具体地点，重要证件注意遮挡隐私',
+      placeholder: '描述物品外观特征（颜色、型号、挂件、贴纸或内部标识），方便失主/拾主快速核对...',
+      mediaHint: '附物品实物照或发现位置环境图更易找回',
+      locationPrompt: '丢失 / 拾获地点（推荐填写，如：美术馆 / 7号楼）',
+      curatedTags: ['#失物招领', '#校园寻物', '#一卡通', '#速写本', '#急寻'],
+      ctaLabel: '发布寻物'
+    },
+    MUTUAL_AID: {
+      headerTitle: '校园互助 · 搭子与应急',
+      headerHint: '拼车买材料、找看展/自习搭子、借工具或代取跑腿，写清时间与人数更易成行',
+      placeholder: '说明出发时间、人数需求、工具型号或具体互助细节，方便顺路的同学直接响应...',
+      mediaHint: '可附路线截图、材料清单或参考图',
+      locationPrompt: '集合或互助地点（如：望京西门 / 红星美凯龙）',
+      curatedTags: ['#校园互助', '#拼车买材料', '#寻找搭子', '#画材借用', '#代取跑腿'],
+      ctaLabel: '发起互助'
+    },
+    EXHIBITION: {
+      headerTitle: '展览资讯 · 看展与导览',
+      headerHint: '记录校内新展、毕业展、快闪空间或 798 周边展览，方便同学错峰观展',
+      placeholder: '分享展览主题、参展艺术家、布展亮点、导览安排或你的看展笔记...',
+      mediaHint: '建议附展览海报或现场空间照片',
+      locationPrompt: '展览场馆（如：央美美术馆 / 7号楼展厅 / 798）',
+      curatedTags: ['#校园展览', '#央美美术馆', '#看展日记', '#毕业季', '#798看展'],
+      ctaLabel: '发布展讯'
+    },
+    ART_CREATION: {
+      headerTitle: '艺术创作 · 作品与过程手记',
+      headerHint: '标记创作媒介与当前阶段，和不同院系同学交流材料技法、构图与策展思路',
+      placeholder: '记录创作灵感、材料技法实验、色彩推敲，或聊聊卡壳的地方听听大家建议...',
+      mediaHint: '上传最多 4 张草图、过程细节或成品局部',
+      locationPrompt: '所在工作室 / 校区（可选）',
+      curatedTags: ['#艺术创作', '#毕业作品', '#材料实验', '#工作室日常', '#作品互评'],
+      ctaLabel: '发布作品'
+    },
+    RELATIONSHIP: {
+      headerTitle: '恋爱情感 · 匿名聊聊心动与困惑',
+      headerHint: '纯匿名安全空间，聊聊校园里的心动瞬间、亲密关系相处或情感提问',
+      placeholder: '写下关于心动、相处、遗憾或想听听大家看法的故事...',
+      mediaHint: '可附一张氛围感配图（可选）',
+      locationPrompt: '偶遇或纪念地点（可选）',
+      curatedTags: ['#恋爱情感', '#央美心动', '#情感树洞', '#脱单随缘', '#关系讨论'],
+      ctaLabel: '匿名发布'
+    }
+  };
+
+  function makeDefaultPubDraft(catKey, locked, initialTag) {
+    const valid = PARTITION_SPECS[catKey] ? catKey : 'TREE_HOLE';
+    return {
+      category: valid,
+      locked: Boolean(locked),
+      body: '',
+      tags: initialTag ? [initialTag] : [],
+      customTagInput: '',
+      mediaList: [],
+      allowComments: true,
+      location: '',
+      eventTime: '',
+      // Partition fields
+      mood: '迷茫',
+      marketSubType: '画材',
+      marketCondition: '九五新',
+      price: '',
+      tradeStatus: '望京面交',
+      oppType: '兼职招募',
+      oppReward: '',
+      oppMode: '线上远程',
+      lfType: '失物寻找',
+      lfItemName: '',
+      aidType: '拼车买材料',
+      aidUrgency: '今天急需',
+      aidReward: '',
+      exhType: '校内个展',
+      exhEntry: '校内免费',
+      artMedium: '油画',
+      artStage: '进行中求建议',
+      relVibe: '情感树洞'
+    };
+  }
+
+  function syncPubInputsToDraft() {
+    if (!nav.pubDraft) return;
+    const d = nav.pubDraft;
+    const val = id => { const el = document.getElementById(id); return el ? el.value : null; };
+    const b = val('pub-body'); if (b !== null) d.body = b;
+    const pr = val('pub-price'); if (pr !== null) d.price = pr;
+    const tm = val('pub-event-time'); if (tm !== null) d.eventTime = tm;
+    const rew = val('pub-opp-reward'); if (rew !== null) d.oppReward = rew;
+    const lfn = val('pub-lf-item'); if (lfn !== null) d.lfItemName = lfn;
+    const ar = val('pub-aid-reward'); if (ar !== null) d.aidReward = ar;
+    const ct = val('pub-custom-tag'); if (ct !== null) d.customTagInput = ct;
+  }
+
+  function renderPublishScreen() {
+    if (!nav.pubDraft) nav.pubDraft = makeDefaultPubDraft('TREE_HOLE', false);
+    const d = nav.pubDraft;
+    const catInfo = D.CATEGORIES[d.category] || D.CATEGORIES.TREE_HOLE;
+    const spec = PARTITION_SPECS[d.category] || PARTITION_SPECS.TREE_HOLE;
+    const pubCats = ['TREE_HOLE', 'MARKETPLACE', 'OPPORTUNITY', 'LOST_FOUND', 'MUTUAL_AID', 'EXHIBITION', 'ART_CREATION', 'RELATIONSHIP'];
+
+    const suggestedTags = Array.from(new Set(spec.curatedTags.concat(D.FIXED_PUBLISH_TAGS))).slice(0, 10);
+    const customTags = (d.tags || []).filter(t => !suggestedTags.includes(t));
+
+    // Partition-specific structured form card
+    let structuredCard = '';
+    if (d.category === 'TREE_HOLE') {
+      const moods = ['迷茫', '焦虑', '疲惫', '释怀', '小确幸', '深夜emo', '想吐槽'];
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>此刻情绪</span></div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${moods.map(m => `<button class="mono-chip ${d.mood === m ? 'inverted' : ''}" data-action="pubSetField" data-field="mood" data-val="${esc(m)}">${esc(m)}</button>`).join('')}
           </div>
+        </div>`;
+    } else if (d.category === 'MARKETPLACE') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>闲置物品信息</span></div>
+          <div class="chip-wrap">
+            ${['画材', '教材', '电子产品', '家具', '生活用品', '服饰'].map(t => `<button class="mono-chip ${d.marketSubType === t ? 'inverted' : ''}" data-action="pubSetField" data-field="marketSubType" data-val="${esc(t)}">${esc(t)}</button>`).join('')}
+          </div>
+          <div class="pub-two-col">
+            <input class="field-input" id="pub-price" placeholder="出物价格（如 ¥120）" value="${esc(d.price)}" />
+            <input class="field-input" id="pub-event-time" placeholder="可面交时间（如 今晚）" value="${esc(d.eventTime)}" />
+          </div>
+          <div style="font-size:0.75rem;color:var(--ink-secondary);">成色</div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${['全新未拆', '九五新', '九成新', '实用成色'].map(c => `<button class="mono-chip ${d.marketCondition === c ? 'inverted' : ''}" data-action="pubSetField" data-field="marketCondition" data-val="${esc(c)}">${esc(c)}</button>`).join('')}
+          </div>
+          <div style="font-size:0.75rem;color:var(--ink-secondary);">交接方式</div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${['望京面交', '燕郊自提', '上海自提', '同城邮寄', '可换物'].map(m => `<button class="mono-chip ${d.tradeStatus === m ? 'inverted' : ''}" data-action="pubSetField" data-field="tradeStatus" data-val="${esc(m)}">${esc(m)}</button>`).join('')}
+          </div>
+        </div>`;
+    } else if (d.category === 'OPPORTUNITY') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>招募 / 机会要素</span></div>
+          <div class="chip-wrap">
+            ${['兼职招募', '实习招聘', '项目合作', '展览协作', '模特招募'].map(t => `<button class="mono-chip ${d.oppType === t ? 'inverted' : ''}" data-action="pubSetField" data-field="oppType" data-val="${esc(t)}">${esc(t)}</button>`).join('')}
+          </div>
+          <div class="pub-two-col">
+            <input class="field-input" id="pub-opp-reward" placeholder="薪资 / 报酬（如 日薪260）" value="${esc(d.oppReward)}" />
+            <input class="field-input" id="pub-event-time" placeholder="周期 / 截止时间" value="${esc(d.eventTime)}" />
+          </div>
+          <div style="font-size:0.75rem;color:var(--ink-secondary);">协作方式</div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${['线上远程', '望京周边', '校内协作', '短期驻场'].map(m => `<button class="mono-chip ${d.oppMode === m ? 'inverted' : ''}" data-action="pubSetField" data-field="oppMode" data-val="${esc(m)}">${esc(m)}</button>`).join('')}
+          </div>
+        </div>`;
+    } else if (d.category === 'LOST_FOUND') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>寻物 / 招领信息</span></div>
+          <div class="pub-seg-row">
+            <button class="pub-seg-btn ${d.lfType === '失物寻找' ? 'active' : ''}" data-action="pubSetField" data-field="lfType" data-val="失物寻找">失物寻找</button>
+            <button class="pub-seg-btn ${d.lfType === '拾物招领' ? 'active' : ''}" data-action="pubSetField" data-field="lfType" data-val="拾物招领">拾物招领</button>
+          </div>
+          <input class="field-input" id="pub-lf-item" placeholder="物品名称（如：校园一卡通 / 黑色速写本 / AirPods）" value="${esc(d.lfItemName)}" />
+          <input class="field-input" id="pub-event-time" placeholder="${d.lfType === '失物寻找' ? '遗失时间（如：今天上午 10:30）' : '拾获时间（如：刚刚在食堂二楼）'}" value="${esc(d.eventTime)}" />
+          <div class="h-scroll-row" style="padding:0;">
+            ${['刚刚', '今天上午', '今天下午', '昨天'].map(t => `<button class="mono-chip ${d.eventTime === t ? 'inverted' : ''}" data-action="pubSetField" data-field="eventTime" data-val="${esc(t)}">${esc(t)}</button>`).join('')}
+          </div>
+        </div>`;
+    } else if (d.category === 'MUTUAL_AID') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>互助需求卡片</span></div>
+          <div class="chip-wrap">
+            ${['拼车买材料', '寻找搭子', '代取跑腿', '学习互助', '借物求助'].map(t => `<button class="mono-chip ${d.aidType === t ? 'inverted' : ''}" data-action="pubSetField" data-field="aidType" data-val="${esc(t)}">${esc(t)}</button>`).join('')}
+          </div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${['今天急需', '本周内', '随时可约'].map(u => `<button class="mono-chip ${d.aidUrgency === u ? 'inverted' : ''}" data-action="pubSetField" data-field="aidUrgency" data-val="${esc(u)}">${esc(u)}</button>`).join('')}
+          </div>
+          <div class="pub-two-col">
+            <input class="field-input" id="pub-event-time" placeholder="约定时间（如 今晚18:30）" value="${esc(d.eventTime)}" />
+            <input class="field-input" id="pub-aid-reward" placeholder="分摊/酬谢（可选，如AA）" value="${esc(d.aidReward)}" />
+          </div>
+        </div>`;
+    } else if (d.category === 'EXHIBITION') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>展览档案信息</span></div>
+          <div class="chip-wrap">
+            ${['校内个展', '群展联展', '毕业展', '讲座导览', '校外看展'].map(t => `<button class="mono-chip ${d.exhType === t ? 'inverted' : ''}" data-action="pubSetField" data-field="exhType" data-val="${esc(t)}">${esc(t)}</button>`).join('')}
+          </div>
+          <input class="field-input" id="pub-event-time" placeholder="展期 / 开幕时间（如：5.12 - 5.28 · 9:30-17:00）" value="${esc(d.eventTime)}" />
+          <div class="h-scroll-row" style="padding:0;">
+            ${['校内免费', '需预约', '开幕导览', '凭证免票'].map(e => `<button class="mono-chip ${d.exhEntry === e ? 'inverted' : ''}" data-action="pubSetField" data-field="exhEntry" data-val="${esc(e)}">${esc(e)}</button>`).join('')}
+          </div>
+        </div>`;
+    } else if (d.category === 'ART_CREATION') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>创作档案标签</span></div>
+          <div class="chip-wrap">
+            ${['油画', '国画', '版画', '雕塑', '实验艺术', '设计排版', '影像装置', '速写'].map(m => `<button class="mono-chip ${d.artMedium === m ? 'inverted' : ''}" data-action="pubSetField" data-field="artMedium" data-val="${esc(m)}">${esc(m)}</button>`).join('')}
+          </div>
+          <div style="font-size:0.75rem;color:var(--ink-secondary);">创作阶段</div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${['灵感草图', '进行中求建议', '成品展示', '毕设打磨'].map(s => `<button class="mono-chip ${d.artStage === s ? 'inverted' : ''}" data-action="pubSetField" data-field="artStage" data-val="${esc(s)}">${esc(s)}</button>`).join('')}
+          </div>
+        </div>`;
+    } else if (d.category === 'RELATIONSHIP') {
+      structuredCard = `
+        <div class="pub-card">
+          <div class="pub-card-title"><span>情感氛围</span></div>
+          <div class="h-scroll-row" style="padding:0;">
+            ${['情感树洞', '心动记录', '恋爱求助', '脱单随缘'].map(v => `<button class="mono-chip ${d.relVibe === v ? 'inverted' : ''}" data-action="pubSetField" data-field="relVibe" data-val="${esc(v)}">${esc(v)}</button>`).join('')}
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="screen-container">
+        <div class="pub-topbar">
+          <div style="display:flex;align-items:center;gap:0.375rem;min-width:0;">
+            <button class="icon-btn-48" style="width:2.5rem;height:2.5rem;" data-action="closePublishScreen" aria-label="关闭发布页">${ICONS.close}</button>
+            ${avatarHtml(state.persona.avatarSeed, 'avatar-24')}
+            <div style="min-width:0;">
+              <div style="font-size:0.875rem;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${d.locked ? '发布到 · ' + esc(catInfo.titleCn) : esc(catInfo.titleCn)}
+              </div>
+              <div style="font-size:0.6875rem;color:var(--ink-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(state.persona.nickname)}</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.375rem;flex-shrink:0;">
+            <button style="font-size:0.8125rem;color:var(--ink-secondary);padding:0.375rem 0.5rem;" data-action="saveDraft">存草稿</button>
+            <button class="btn-grad-sm" style="padding:0.5rem 0.875rem;font-size:0.8125rem;" data-action="submitPost">${esc(spec.ctaLabel)}</button>
+          </div>
+        </div>
+
+        <div class="scroll-area sub-scroll" style="padding:1rem;display:flex;flex-direction:column;gap:0.875rem;">
+          ${d.locked ? `
+            <div class="pub-partition-hero">
+              <span class="pub-partition-badge">${catIcon(d.category)}</span>
+              <div style="min-width:0;flex:1;">
+                <div style="font-size:0.875rem;font-weight:700;color:var(--ink);">${esc(spec.headerTitle)}</div>
+                <div style="font-size:0.75rem;line-height:1.45;color:var(--ink-secondary);margin-top:0.15rem;">${esc(spec.headerHint)}</div>
+              </div>
+            </div>
+          ` : `
+            <div class="pub-card">
+              <div class="pub-card-title">
+                <span>选择发布分区</span>
+                <span style="font-size:0.75rem;font-weight:500;color:var(--ink-secondary);">当前：${esc(catInfo.titleCn)}</span>
+              </div>
+              <div class="chip-wrap">
+                ${pubCats.map(k => `<button class="mono-chip ${d.category === k ? 'inverted' : ''}" data-action="pubPickCat" data-val="${k}">${esc((D.CATEGORIES[k] || {}).titleCn || k)}</button>`).join('')}
+              </div>
+              <div style="font-size:0.75rem;line-height:1.45;color:var(--ink-secondary);">${esc(spec.headerHint)}</div>
+            </div>
+          `}
+
+          ${structuredCard}
+
+          <div class="pub-card">
+            <textarea class="field-textarea" id="pub-body" style="min-height:8.5rem;border:none;padding:0;background:transparent;font-size:0.9375rem;" placeholder="${esc(spec.placeholder)}">${esc(d.body)}</textarea>
+            <label class="pub-media-hint-bar">
+              <span style="width:1.125rem;height:1.125rem;color:var(--active-tint);display:flex;flex-shrink:0;">${ICONS.photo}</span>
+              <span>${d.mediaList.length ? '已添加 ' + d.mediaList.length + '/4 张图片 · 点击继续添加' : esc(spec.mediaHint)}</span>
+              <input type="file" accept="image/*" multiple id="pub-media-input" style="display:none;" />
+            </label>
+            ${d.mediaList.length ? `
+              <div class="pub-media-strip">
+                ${d.mediaList.map((m, idx) => `
+                  <div class="pub-media-thumb-wrap">
+                    <img src="${m.src}" alt="已选图片" />
+                    <button class="pub-media-remove" data-action="pubRemoveMedia" data-idx="${idx}" aria-label="移除图片">${ICONS.close}</button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="pub-card">
+            <div class="pub-card-title">
+              <span style="display:flex;align-items:center;gap:0.375rem;">
+                <span style="width:1rem;height:1rem;color:var(--active-tint);display:flex;">${ICONS.loc}</span>
+                <span>${d.location ? esc(d.location) : esc(spec.locationPrompt)}</span>
+              </span>
+              ${d.location ? `<button style="font-size:0.75rem;color:var(--ink-muted);" data-action="pubSetField" data-field="location" data-val="">清除</button>` : ''}
+            </div>
+            <div class="h-scroll-row" style="padding:0;">
+              ${D.CAFA_LOCATIONS.slice(0, 10).map(loc => `<button class="mono-chip ${d.location === loc ? 'inverted' : ''}" data-action="pubPickLoc" data-val="${esc(loc)}">${esc(loc)}</button>`).join('')}
+            </div>
+          </div>
+
+          <div class="pub-card">
+            <div class="pub-card-title">
+              <span>${esc(catInfo.titleCn)}推荐标签</span>
+              <span style="font-size:0.75rem;font-weight:500;color:var(--ink-muted);">已选 ${(d.tags || []).length}/5</span>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+              <input class="field-input" id="pub-custom-tag" placeholder="#输入自定义标签" value="${esc(d.customTagInput)}" maxlength="18" />
+              <button class="btn-grad-sm" style="flex-shrink:0;padding:0 0.875rem;" data-action="pubAddCustomTag">添加</button>
+            </div>
+            ${customTags.length ? `
+              <div class="chip-wrap">
+                ${customTags.map(tg => `<button class="mono-chip inverted" data-action="pubToggleTag" data-val="${esc(tg)}">${esc(tg)} ×</button>`).join('')}
+              </div>
+            ` : ''}
+            <div class="chip-wrap">
+              ${suggestedTags.map(tg => `<button class="mono-chip ${(d.tags || []).includes(tg) ? 'inverted' : ''}" data-action="pubToggleTag" data-val="${esc(tg)}">${esc(tg)}</button>`).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="pub-bottom-bar">
+          <div style="display:flex;align-items:center;gap:0.5rem;">
+            <label class="icon-btn-48" style="width:2.625rem;height:2.625rem;cursor:pointer;" aria-label="添加图片">
+              ${ICONS.photo}
+              <input type="file" accept="image/*" multiple id="pub-media-toolbar-input" style="display:none;" />
+            </label>
+          </div>
+          <button style="display:flex;align-items:center;gap:0.5rem;" data-action="pubToggleComments">
+            <span style="font-size:0.75rem;color:var(--ink-secondary);">${d.allowComments ? '允许评论' : '关闭评论'}</span>
+            <div class="m3-switch ${d.allowComments ? 'on' : ''}"><div class="m3-switch-thumb"></div></div>
+          </button>
         </div>
       </div>
     `;
@@ -2039,43 +2704,64 @@
       `;
     }
 
-    if (type === 'publish') {
-      const pubCats = ['TREE_HOLE', 'MARKETPLACE', 'OPPORTUNITY', 'LOST_FOUND', 'MUTUAL_AID', 'EXHIBITION', 'ART_CREATION'];
+    if (type === 'verificationGate') {
+      return `
+        <div class="gate-backdrop" data-action="closeModalBackdrop">
+          <div class="gb-card gate-dialog">
+            <div class="gb-card-inner">
+              <div class="gate-hero fluid-aurora-dark">
+                <h2 style="margin:0;font-size:1.1875rem;font-weight:700;color:#FFFFFF;">认证央美身份后即可互动</h2>
+              </div>
+              <div style="padding:1.25rem;display:flex;flex-direction:column;gap:0.75rem;">
+                <p style="margin:0;font-size:0.875rem;line-height:1.55;color:var(--ink);">
+                  「${esc(data.actionLabel || '发布校园内容')}」仅面向通过中央美术学院在读学生或毕业校友认证的成员开放。
+                </p>
+                <p style="margin:0;font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">
+                  实名核验资料严格保密，社区内仅以独立匿名身份发声。
+                </p>
+                <div style="display:flex;gap:0.625rem;margin-top:0.25rem;">
+                  <button class="btn-outline-full" style="flex:1;border-radius:0.5rem;" data-action="closeModal">先逛逛</button>
+                  <button class="btn-primary-full" style="flex:1.3;border-radius:0.5rem;" data-action="gateGoVerify">
+                    <span>去认证</span>
+                    <span style="width:1rem;height:1rem;display:flex;">${ICONS.arrowRight}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (type === 'verifyPhotoSource') {
+      const proofType = (nav.verifyDraft && nav.verifyDraft.proofType) || '学生证';
       return `
         <div class="sheet-backdrop" data-action="closeModalBackdrop">
           <div class="sheet-panel">
             <div class="sheet-handle"></div>
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <div style="display:flex;align-items:center;gap:0.5rem;">
-                ${avatarHtml(state.persona.avatarSeed, 'avatar-32')}
-                <div>
-                  <div style="font-size:0.9375rem;font-weight:700;">${esc((D.CATEGORIES[data.category] || D.CATEGORIES.TREE_HOLE).titleCn)}</div>
-                  <div style="font-size:0.6875rem;color:var(--ink-secondary);">${esc(state.persona.nickname)}</div>
-                </div>
-              </div>
+              <h2 style="margin:0;font-size:1.0625rem;font-weight:700;">选择认证照片上传方式</h2>
               <button class="icon-btn-48" style="width:2.25rem;height:2.25rem;" data-action="closeModal">${ICONS.close}</button>
             </div>
-            <div class="chip-wrap">
-              ${pubCats.map(k => `<button class="mono-chip ${data.category === k ? 'inverted' : ''}" data-action="pubPickCat" data-val="${k}">${D.CATEGORIES[k].titleCn}</button>`).join('')}
-            </div>
-            <textarea class="field-textarea" id="pub-body" style="min-height:7rem;" placeholder="直接写下此刻的想法、作品进展或求助，无需标题...">${esc(data.body || '')}</textarea>
-            ${data.category === 'MARKETPLACE' ? `<input class="field-input" id="pub-price" placeholder="价格（如 ¥ 120）" value="${esc(data.price || '')}" />` : ''}
-            <div>
-              <div style="font-size:0.75rem;color:var(--ink-secondary);margin-bottom:0.375rem;">快捷地点</div>
-              <div class="h-scroll-row" style="padding:0;">
-                ${D.CAFA_LOCATIONS.slice(0, 8).map(loc => `<button class="mono-chip ${data.location === loc ? 'inverted' : ''}" data-action="pubPickLoc" data-val="${esc(loc)}">${esc(loc)}</button>`).join('')}
+            <p style="margin:0;font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">
+              请上传清晰的「${esc(proofType)}」照片（含中央美术学院标识，可对姓名与学号打码）
+            </p>
+            <label class="photo-source-option">
+              <span class="photo-source-icon" style="color:#D946EF;">${ICONS.camera}</span>
+              <div>
+                <div style="font-size:0.875rem;font-weight:600;color:var(--ink);">现场拍照</div>
+                <div style="font-size:0.6875rem;color:var(--ink-secondary);margin-top:0.125rem;">调用相机实时拍摄本校身份证明</div>
               </div>
-            </div>
-            <div>
-              <div style="font-size:0.75rem;color:var(--ink-secondary);margin-bottom:0.375rem;">话题标签</div>
-              <div class="chip-wrap">
-                ${D.FIXED_PUBLISH_TAGS.slice(0, 8).map(tg => `<button class="mono-chip ${(data.tags || []).includes(tg) ? 'inverted' : ''}" data-action="pubToggleTag" data-val="${esc(tg)}">${esc(tg)}</button>`).join('')}
+              <input type="file" accept="image/*" capture="environment" id="verify-camera-input" style="display:none;" />
+            </label>
+            <label class="photo-source-option">
+              <span class="photo-source-icon" style="color:var(--active-tint);">${ICONS.photo}</span>
+              <div>
+                <div style="font-size:0.875rem;font-weight:600;color:var(--ink);">从相册选择照片</div>
+                <div style="font-size:0.6875rem;color:var(--ink-secondary);margin-top:0.125rem;">上传手机相册中的学生证 / 一卡通 / 通知书 / 毕业证图片</div>
               </div>
-            </div>
-            <div style="display:flex;gap:0.625rem;">
-              <button class="btn-outline-full" style="flex:1;" data-action="saveDraft">存草稿</button>
-              <button class="btn-primary-full" style="flex:1.6;" data-action="submitPost">发布</button>
-            </div>
+              <input type="file" accept="image/*" id="verify-album-input" style="display:none;" />
+            </label>
           </div>
         </div>
       `;
@@ -2319,6 +3005,7 @@
       else if (top.name === 'profileCollection') html = renderProfileCollectionScreen(top.params.colKey);
       else if (top.name === 'settings') html = renderSettingsScreen();
       else if (top.name === 'verification') html = renderVerificationScreen();
+      else if (top.name === 'publish') html = renderPublishScreen();
     } else {
       if (nav.activeTab === 'home') html = renderHomeScreen();
       else if (nav.activeTab === 'discover') html = renderDiscoverScreen();
@@ -2368,18 +3055,61 @@
       });
     }
 
-    const verifyFileInput = document.getElementById('verify-file-input');
-    if (verifyFileInput) {
-      verifyFileInput.addEventListener('change', (e) => {
-        if (e.target.files && e.target.files.length > 0) {
-          state.persona.identityType = nav.verifyDraftType || state.persona.identityType || '在读学生';
-          state.persona.isVerified = true;
-          saveState();
-          render();
-          showToast('已核验央美身份凭证，认证通过');
+    function handleVerifyFileSelected(file, sourceLabel) {
+      if (!file) return;
+      if (file.type && !file.type.startsWith('image/')) {
+        showToast('请上传图片格式的央美身份凭证');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        nav.verifyDraft.proofDataUrl = String(reader.result || '');
+        nav.verifyDraft.proofLabel = `已${sourceLabel}「${nav.verifyDraft.proofType}」照片`;
+        nav.modal = null;
+        render();
+        showToast('凭证照片已上传，请确认下方声明后提交审核');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    const verifyCameraInput = document.getElementById('verify-camera-input');
+    if (verifyCameraInput) {
+      verifyCameraInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+          handleVerifyFileSelected(e.target.files[0], '现场拍摄');
         }
       });
     }
+    const verifyAlbumInput = document.getElementById('verify-album-input');
+    if (verifyAlbumInput) {
+      verifyAlbumInput.addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+          handleVerifyFileSelected(e.target.files[0], '从相册选择');
+        }
+      });
+    }
+
+    function bindPubMediaPicker(elId) {
+      const inp = document.getElementById(elId);
+      if (!inp) return;
+      inp.addEventListener('change', (e) => {
+        if (!nav.pubDraft || !e.target.files || !e.target.files.length) return;
+        syncPubInputsToDraft();
+        const remaining = Math.max(0, 4 - nav.pubDraft.mediaList.length);
+        const files = Array.from(e.target.files).slice(0, remaining);
+        files.forEach(file => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            if (!nav.pubDraft) return;
+            nav.pubDraft.mediaList.push({ src: String(reader.result || '') });
+            render();
+          };
+          reader.readAsDataURL(file);
+        });
+      });
+    }
+    bindPubMediaPicker('pub-media-input');
+    bindPubMediaPicker('pub-media-toolbar-input');
 
     const personaInput = document.getElementById('persona-nick-input');
     if (personaInput && nav.modal && nav.modal.type === 'personaEditor') {
@@ -2395,20 +3125,23 @@
         const input = document.getElementById('comment-input');
         const text = (input && input.value || '').trim();
         if (!text) return;
-        const postId = commentForm.getAttribute('data-post-id');
-        const post = state.posts.find(p => p.id === postId);
-        if (post) {
-          post.comments.push({
-            id: 'c_' + Date.now(),
-            author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
-            content: text,
-            createdAt: '刚刚',
-            likes: 0
-          });
-          saveState();
-          render();
-          showToast('评论已发布');
-        }
+        requireVerified('发表评论与回复', () => {
+          const postId = commentForm.getAttribute('data-post-id');
+          const post = state.posts.find(p => p.id === postId);
+          if (post) {
+            post.comments.push({
+              id: 'c_' + Date.now(),
+              author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+              content: text,
+              createdAt: '刚刚',
+              likes: 0
+            });
+            recalculateHotTopicsForDay(getLocalDayKey());
+            saveState();
+            render();
+            showToast('评论已发布');
+          }
+        });
       });
     }
   }
@@ -2426,12 +3159,27 @@
     }
   }
 
-  function openPublishModal(defaultCat) {
-    nav.modal = {
-      type: 'publish',
-      data: { category: defaultCat || 'ART_CREATION', title: '', body: '', price: '', location: '', tags: [] }
+  function openPublishScreen(defaultCat, locked, initialTag) {
+    requireVerified('发布校园内容', () => {
+      nav.pubDraft = makeDefaultPubDraft(defaultCat || 'TREE_HOLE', Boolean(locked), initialTag);
+      pushScreen('publish', { category: nav.pubDraft.category, locked: nav.pubDraft.locked });
+    });
+  }
+
+  function openVerificationFlow() {
+    nav.verifyDraft = {
+      identityType: state.persona.identityType || '在读学生',
+      proofType: getProofTypeOptions(state.persona.identityType || '在读学生')[0],
+      proofLabel: (state.verificationRecord && state.verificationRecord.proofLabel) || '',
+      proofDataUrl: (state.verificationRecord && state.verificationRecord.proofDataUrl) || '',
+      agreedPolicy: false
     };
-    render();
+    pushScreen('verification');
+  }
+
+  function clearVerifyAuditTimers() {
+    (nav.verifyAuditTimers || []).forEach(t => clearTimeout(t));
+    nav.verifyAuditTimers = [];
   }
 
   document.addEventListener('click', (e) => {
@@ -2548,11 +3296,7 @@
 
       if (act === 'openPublishWithTag') {
         const tg = actionEl.getAttribute('data-tag');
-        nav.modal = {
-          type: 'publish',
-          data: { category: 'TREE_HOLE', title: '', body: '', price: '', location: '', tags: tg ? [tg] : [] }
-        };
-        render();
+        openPublishScreen('TREE_HOLE', false, tg);
         return;
       }
 
@@ -2584,7 +3328,7 @@
       }
 
       if (act === 'openPublishInCat') {
-        openPublishModal(actionEl.getAttribute('data-cat'));
+        openPublishScreen(actionEl.getAttribute('data-cat'), true);
         return;
       }
 
@@ -2626,8 +3370,11 @@
         return;
       }
       if (act === 'openAddReview') {
-        nav.modal = { type: 'addReview', data: { courseId: actionEl.getAttribute('data-id'), suitable: '跨专业友好' } };
-        render();
+        const cid = actionEl.getAttribute('data-id');
+        requireVerified('发布选课评价', () => {
+          nav.modal = { type: 'addReview', data: { courseId: cid, suitable: '跨专业友好' } };
+          render();
+        });
         return;
       }
       if (act === 'revPickSuit') {
@@ -2636,68 +3383,75 @@
         return;
       }
       if (act === 'submitReview') {
-        const c = state.courses.find(x => x.id === actionEl.getAttribute('data-id'));
-        const content = (document.getElementById('rev-content')?.value || '').trim();
-        if (!content) { showToast('请先写下你的课程体验'); return; }
-        const rec = Math.max(1, Math.min(5, Number(document.getElementById('rev-rec')?.value || 5)));
-        const diff = Math.max(1, Math.min(5, Number(document.getElementById('rev-diff')?.value || 4)));
-        const work = Math.max(1, Math.min(5, Number(document.getElementById('rev-work')?.value || 3)));
-        const suit = nav.modal?.data?.suitable || '跨专业友好';
-        if (c) {
-          c.reviews.unshift({
-            id: 'r_' + Date.now(),
-            author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
-            semester: c.courseType,
-            content,
-            workload: work,
-            difficulty: diff,
-            recommend: rec,
-            attendanceMode: '偶尔抽查',
-            examFormat: '作品汇报',
-            suitableTag: suit,
-            createdAt: '刚刚',
-            helpfulCount: 1
-          });
-          const len = c.reviews.length;
-          c.workloadScore = c.reviews.reduce((a, b) => a + b.workload, 0) / len;
-          c.difficultyScore = c.reviews.reduce((a, b) => a + b.difficulty, 0) / len;
-          c.recommendScore = c.reviews.reduce((a, b) => a + b.recommend, 0) / len;
-          c.suitableFor = suit;
-          saveState();
-        }
-        nav.modal = null;
-        render();
-        showToast('课程评价已提交');
+        const cid = actionEl.getAttribute('data-id');
+        requireVerified('发布选课评价', () => {
+          const c = state.courses.find(x => x.id === cid);
+          const content = (document.getElementById('rev-content')?.value || '').trim();
+          if (!content) { showToast('请先写下你的课程体验'); return; }
+          const rec = Math.max(1, Math.min(5, Number(document.getElementById('rev-rec')?.value || 5)));
+          const diff = Math.max(1, Math.min(5, Number(document.getElementById('rev-diff')?.value || 4)));
+          const work = Math.max(1, Math.min(5, Number(document.getElementById('rev-work')?.value || 3)));
+          const suit = nav.modal?.data?.suitable || '跨专业友好';
+          if (c) {
+            c.reviews.unshift({
+              id: 'r_' + Date.now(),
+              author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+              semester: c.courseType,
+              content,
+              workload: work,
+              difficulty: diff,
+              recommend: rec,
+              attendanceMode: '偶尔抽查',
+              examFormat: '作品汇报',
+              suitableTag: suit,
+              createdAt: '刚刚',
+              helpfulCount: 1
+            });
+            const len = c.reviews.length;
+            c.workloadScore = c.reviews.reduce((a, b) => a + b.workload, 0) / len;
+            c.difficultyScore = c.reviews.reduce((a, b) => a + b.difficulty, 0) / len;
+            c.recommendScore = c.reviews.reduce((a, b) => a + b.recommend, 0) / len;
+            c.suitableFor = suit;
+            saveState();
+          }
+          nav.modal = null;
+          render();
+          showToast('课程评价已提交');
+        });
         return;
       }
       if (act === 'openCreateCourse') {
-        nav.modal = { type: 'createCourse', data: { courseType: '跨院选修', campus: '望京本院' } };
-        render();
+        requireVerified('共建选课档案', () => {
+          nav.modal = { type: 'createCourse', data: { courseType: '跨院选修', campus: '望京本院' } };
+          render();
+        });
         return;
       }
       if (act === 'ccPickType') { nav.modal.data.courseType = actionEl.getAttribute('data-val'); render(); return; }
       if (act === 'ccPickCampus') { nav.modal.data.campus = actionEl.getAttribute('data-val'); render(); return; }
       if (act === 'submitNewCourse') {
-        const name = (document.getElementById('cc-name')?.value || '').trim();
-        const instructor = (document.getElementById('cc-instructor')?.value || '').trim();
-        const summary = (document.getElementById('cc-summary')?.value || '').trim();
-        if (!name || !instructor) { showToast('请填写课程名称和授课教师'); return; }
-        const campus = nav.modal.data.campus || '望京本院';
-        const college = (D.CAFA_CAMPUS_COLLEGES[campus] || ['设计学院'])[0];
-        state.courses.unshift({
-          id: 'course_' + Date.now(),
-          name, instructor, campus, college,
-          major: '人文理论与策展',
-          courseType: nav.modal.data.courseType || '跨院选修',
-          workloadScore: 3.0, difficultyScore: 4.5, recommendScore: 4.5,
-          suitableFor: '跨专业友好', isBookmarked: false,
-          summary: summary || '同学共建新课，欢迎大家补充更多评价。',
-          reviews: []
+        requireVerified('共建选课档案', () => {
+          const name = (document.getElementById('cc-name')?.value || '').trim();
+          const instructor = (document.getElementById('cc-instructor')?.value || '').trim();
+          const summary = (document.getElementById('cc-summary')?.value || '').trim();
+          if (!name || !instructor) { showToast('请填写课程名称和授课教师'); return; }
+          const campus = nav.modal.data.campus || '望京本院';
+          const college = (D.CAFA_CAMPUS_COLLEGES[campus] || ['设计学院'])[0];
+          state.courses.unshift({
+            id: 'course_' + Date.now(),
+            name, instructor, campus, college,
+            major: '人文理论与策展',
+            courseType: nav.modal.data.courseType || '跨院选修',
+            workloadScore: 3.0, difficultyScore: 4.5, recommendScore: 4.5,
+            suitableFor: '跨专业友好', isBookmarked: false,
+            summary: summary || '同学共建新课，欢迎大家补充更多评价。',
+            reviews: []
+          });
+          saveState();
+          nav.modal = null;
+          render();
+          showToast('新课程已加入档案');
         });
-        saveState();
-        nav.modal = null;
-        render();
-        showToast('新课程已加入档案');
         return;
       }
 
@@ -2722,30 +3476,32 @@
         return;
       }
       if (act === 'submitSeniorExp') {
-        const body = (document.getElementById('exp-compose-body')?.value || '').trim();
-        if (!body) { showToast('请先写下你的经验分享'); return; }
-        const firstLine = body.split('\n')[0].slice(0, 26);
-        state.experiences.unshift({
-          id: 'exp_' + Date.now(),
-          category: nav.modal.data.category || '留学',
-          title: firstLine,
-          summary: body.slice(0, 68),
-          body,
-          author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
-          college: '中央美术学院',
-          major: nav.modal.data.category || '经验分享',
-          year: nav.modal.data.cohort || '2024届',
-          readMinutes: Math.max(1, Math.ceil(body.length / 280)),
-          likeCount: 1,
-          bookmarkCount: 0,
-          isBookmarked: false,
-          tags: [nav.modal.data.category || '经验', nav.modal.data.cohort || '2024届'],
-          comments: []
+        requireVerified('在学长学姐说发帖', () => {
+          const body = (document.getElementById('exp-compose-body')?.value || '').trim();
+          if (!body) { showToast('请先写下你的经验分享'); return; }
+          const firstLine = body.split('\n')[0].slice(0, 26);
+          state.experiences.unshift({
+            id: 'exp_' + Date.now(),
+            category: nav.modal.data.category || '留学',
+            title: firstLine,
+            summary: body.slice(0, 68),
+            body,
+            author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+            college: '中央美术学院',
+            major: nav.modal.data.category || '经验分享',
+            year: nav.modal.data.cohort || '2024届',
+            readMinutes: Math.max(1, Math.ceil(body.length / 280)),
+            likeCount: 1,
+            bookmarkCount: 0,
+            isBookmarked: false,
+            tags: [nav.modal.data.category || '经验', nav.modal.data.cohort || '2024届'],
+            comments: []
+          });
+          saveState();
+          nav.modal = null;
+          render();
+          showToast('经验已发布到学长学姐说');
         });
-        saveState();
-        nav.modal = null;
-        render();
-        showToast('经验已发布到学长学姐说');
         return;
       }
 
@@ -2837,18 +3593,91 @@
         return;
       }
 
-      if (act === 'openVerification') {
-        nav.verifyDraftType = state.persona.identityType || '在读学生';
-        pushScreen('verification');
+      if (act === 'gateGoVerify') {
+        nav.modal = null;
+        openVerificationFlow();
         return;
       }
-      if (act === 'verifyPickType') { nav.verifyDraftType = actionEl.getAttribute('data-val'); render(); return; }
-      if (act === 'completeVerification') {
-        state.persona.identityType = nav.verifyDraftType || state.persona.identityType || '在读学生';
-        state.persona.isVerified = true;
+      if (act === 'openVerification') {
+        openVerificationFlow();
+        return;
+      }
+      if (act === 'verifyPickType') {
+        nav.verifyDraft.identityType = actionEl.getAttribute('data-val');
+        const opts = getProofTypeOptions(nav.verifyDraft.identityType);
+        if (!opts.includes(nav.verifyDraft.proofType)) nav.verifyDraft.proofType = opts[0];
+        render();
+        return;
+      }
+      if (act === 'verifyPickProofType') {
+        nav.verifyDraft.proofType = actionEl.getAttribute('data-val');
+        render();
+        return;
+      }
+      if (act === 'openVerifyPhotoSheet') {
+        nav.modal = { type: 'verifyPhotoSource', data: {} };
+        render();
+        return;
+      }
+      if (act === 'verifyTogglePolicy') {
+        nav.verifyDraft.agreedPolicy = !nav.verifyDraft.agreedPolicy;
+        render();
+        return;
+      }
+      if (act === 'submitVerification') {
+        if (!nav.verifyDraft.proofDataUrl) {
+          showToast('请先拍照或从相册上传央美身份凭证照片');
+          nav.modal = { type: 'verifyPhotoSource', data: {} };
+          render();
+          return;
+        }
+        if (!nav.verifyDraft.agreedPolicy) {
+          showToast('请先勾选凭证真实性与隐私核验确认');
+          return;
+        }
+        clearVerifyAuditTimers();
+        state.verificationStatus = 'REVIEWING';
+        state.verificationRecord = {
+          identityType: nav.verifyDraft.identityType,
+          proofType: nav.verifyDraft.proofType,
+          proofLabel: `${nav.verifyDraft.proofType} · ${nav.verifyDraft.proofLabel || '央美身份凭证'}`,
+          proofDataUrl: nav.verifyDraft.proofDataUrl,
+          rejectReason: ''
+        };
+        nav.verifyAuditStep = 1;
         saveState();
         render();
-        showToast('已完成央美校园身份认证');
+
+        nav.verifyAuditTimers.push(setTimeout(() => {
+          if (state.verificationStatus !== 'REVIEWING') return;
+          nav.verifyAuditStep = 2;
+          render();
+        }, 950));
+        nav.verifyAuditTimers.push(setTimeout(() => {
+          if (state.verificationStatus !== 'REVIEWING') return;
+          nav.verifyAuditStep = 3;
+          render();
+        }, 2000));
+        nav.verifyAuditTimers.push(setTimeout(() => {
+          if (state.verificationStatus !== 'REVIEWING') return;
+          state.verificationStatus = 'VERIFIED';
+          state.persona.identityType = state.verificationRecord.identityType || '在读学生';
+          state.persona.isVerified = true;
+          nav.verifyAuditStep = 0;
+          saveState();
+          render();
+          showToast('央美本校身份核验已通过，已为你解锁发帖与互动权限');
+        }, 2900));
+        return;
+      }
+      if (act === 'cancelVerifyReview') {
+        clearVerifyAuditTimers();
+        nav.verifyAuditStep = 0;
+        state.verificationStatus = 'UNVERIFIED';
+        state.persona.isVerified = false;
+        saveState();
+        render();
+        showToast('已撤回认证申请，可重新上传凭证');
         return;
       }
 
@@ -2863,10 +3692,8 @@
       if (act === 'profileMenu') {
         const k = actionEl.getAttribute('data-key');
         if (k === 'SETTINGS') pushScreen('settings');
-        else if (k === 'VERIFY') {
-          nav.verifyDraftType = state.persona.identityType || '在读学生';
-          pushScreen('verification');
-        } else pushScreen('profileCollection', { colKey: k });
+        else if (k === 'VERIFY') openVerificationFlow();
+        else pushScreen('profileCollection', { colKey: k });
         return;
       }
       if (act === 'deleteDraft') {
@@ -2876,72 +3703,166 @@
         return;
       }
 
-      // Publish Modal
+      // Full-screen Partition-Specific Publish Screen Actions
+      if (act === 'closePublishScreen') {
+        nav.pubDraft = null;
+        popScreen();
+        return;
+      }
       if (act === 'pubPickCat') {
-        nav.modal.data.title = document.getElementById('pub-title')?.value || '';
-        nav.modal.data.body = document.getElementById('pub-body')?.value || '';
-        nav.modal.data.category = actionEl.getAttribute('data-val');
+        syncPubInputsToDraft();
+        if (nav.pubDraft) nav.pubDraft.category = actionEl.getAttribute('data-val');
+        render();
+        return;
+      }
+      if (act === 'pubSetField') {
+        syncPubInputsToDraft();
+        const f = actionEl.getAttribute('data-field');
+        const v = actionEl.getAttribute('data-val');
+        if (nav.pubDraft && f) nav.pubDraft[f] = v;
         render();
         return;
       }
       if (act === 'pubPickLoc') {
-        nav.modal.data.title = document.getElementById('pub-title')?.value || '';
-        nav.modal.data.body = document.getElementById('pub-body')?.value || '';
+        syncPubInputsToDraft();
         const v = actionEl.getAttribute('data-val');
-        nav.modal.data.location = nav.modal.data.location === v ? '' : v;
+        if (nav.pubDraft) nav.pubDraft.location = nav.pubDraft.location === v ? '' : v;
         render();
         return;
       }
       if (act === 'pubToggleTag') {
-        nav.modal.data.title = document.getElementById('pub-title')?.value || '';
-        nav.modal.data.body = document.getElementById('pub-body')?.value || '';
+        syncPubInputsToDraft();
         const tg = actionEl.getAttribute('data-val');
-        const arr = nav.modal.data.tags || [];
-        nav.modal.data.tags = arr.includes(tg) ? arr.filter(x => x !== tg) : [...arr, tg];
+        if (nav.pubDraft) {
+          const arr = nav.pubDraft.tags || [];
+          if (arr.includes(tg)) nav.pubDraft.tags = arr.filter(x => x !== tg);
+          else if (arr.length < 5) nav.pubDraft.tags = [...arr, tg];
+          else showToast('最多选择 5 个话题标签');
+        }
+        render();
+        return;
+      }
+      if (act === 'pubAddCustomTag') {
+        syncPubInputsToDraft();
+        if (nav.pubDraft) {
+          const clean = (nav.pubDraft.customTagInput || '').trim().replace(/^#/, '').replace(/\s+/g, '').slice(0, 16);
+          if (clean) {
+            const formatted = '#' + clean;
+            if ((nav.pubDraft.tags || []).length >= 5) {
+              showToast('最多选择 5 个话题标签');
+            } else if (!nav.pubDraft.tags.includes(formatted)) {
+              nav.pubDraft.tags.push(formatted);
+              nav.pubDraft.customTagInput = '';
+            }
+          }
+        }
+        render();
+        return;
+      }
+      if (act === 'pubRemoveMedia') {
+        syncPubInputsToDraft();
+        const idx = Number(actionEl.getAttribute('data-idx'));
+        if (nav.pubDraft && !Number.isNaN(idx)) {
+          nav.pubDraft.mediaList.splice(idx, 1);
+        }
+        render();
+        return;
+      }
+      if (act === 'pubToggleComments') {
+        syncPubInputsToDraft();
+        if (nav.pubDraft) nav.pubDraft.allowComments = !nav.pubDraft.allowComments;
         render();
         return;
       }
       if (act === 'saveDraft') {
-        const title = (document.getElementById('pub-title')?.value || '').trim();
-        const body = (document.getElementById('pub-body')?.value || '').trim();
-        if (!title && !body) { showToast('内容为空，未保存草稿'); return; }
-        state.drafts.unshift({ id: 'draft_' + Date.now(), category: nav.modal.data.category, title, body, createdAt: '刚刚' });
+        syncPubInputsToDraft();
+        const d = nav.pubDraft;
+        const body = (d && d.body || '').trim();
+        if (!body) { showToast('内容为空，未保存草稿'); return; }
+        state.drafts.unshift({ id: 'draft_' + Date.now(), category: d.category, title: '', body, createdAt: '刚刚' });
         saveState();
-        nav.modal = null;
-        render();
+        nav.pubDraft = null;
+        popScreen();
         showToast('已保存到我的草稿');
         return;
       }
       if (act === 'submitPost') {
-        const title = (document.getElementById('pub-title')?.value || '').trim();
-        const body = (document.getElementById('pub-body')?.value || '').trim();
-        const price = (document.getElementById('pub-price')?.value || '').trim();
-        if (!body && !title) { showToast('先写点内容再发布吧'); return; }
-        state.posts.unshift({
-          id: 'post_' + Date.now(),
-          title,
-          body: body || title,
-          author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
-          category: nav.modal.data.category,
-          topicTags: nav.modal.data.tags || [],
-          mediaList: [],
-          createdAt: '刚刚',
-          viewCount: 1,
-          likeCount: 0,
-          bookmarkCount: 0,
-          isLiked: false,
-          isBookmarked: false,
-          isMine: true,
-          price: price || undefined,
-          location: nav.modal.data.location || undefined,
-          comments: []
+        syncPubInputsToDraft();
+        requireVerified('发布校园内容', () => {
+          const d = nav.pubDraft;
+          const rawBody = (d && d.body || '').trim();
+          if (!rawBody) { showToast('先写点内容再发布吧'); return; }
+
+          const autoTags = [];
+          let prefix = '';
+          let finalTitle = '';
+          let finalPrice;
+          let finalMood;
+          if (d.category === 'TREE_HOLE') {
+            finalMood = d.mood;
+          } else if (d.category === 'MARKETPLACE') {
+            autoTags.push('#' + d.marketSubType);
+            finalPrice = d.price.trim() ? (d.price.trim().startsWith('¥') ? d.price.trim() : '¥ ' + d.price.trim()) : undefined;
+            prefix = `【${d.marketSubType} · ${d.marketCondition} · ${d.tradeStatus}】`;
+          } else if (d.category === 'OPPORTUNITY') {
+            autoTags.push('#' + d.oppType);
+            prefix = `【${d.oppType} · ${d.oppMode}${d.oppReward.trim() ? ' · 报酬 ' + d.oppReward.trim() : ''}】`;
+            finalTitle = d.oppType;
+          } else if (d.category === 'LOST_FOUND') {
+            autoTags.push('#' + d.lfType);
+            prefix = `【${d.lfType}${d.lfItemName.trim() ? ' ' + d.lfItemName.trim() : ''}】`;
+            finalTitle = (d.lfType + ' ' + d.lfItemName.trim()).trim().slice(0, 15);
+          } else if (d.category === 'MUTUAL_AID') {
+            autoTags.push('#' + d.aidType);
+            prefix = `【${d.aidType} · ${d.aidUrgency}${d.aidReward.trim() ? ' · ' + d.aidReward.trim() : ''}】`;
+          } else if (d.category === 'EXHIBITION') {
+            autoTags.push('#' + d.exhType);
+            prefix = `【${d.exhType} · ${d.exhEntry}】`;
+          } else if (d.category === 'ART_CREATION') {
+            autoTags.push('#' + d.artMedium);
+            prefix = `【${d.artMedium} · ${d.artStage}】`;
+          } else if (d.category === 'RELATIONSHIP') {
+            autoTags.push('#' + d.relVibe);
+            finalMood = d.relVibe;
+          }
+
+          const finalBody = prefix && !rawBody.startsWith('【') ? `${prefix}\n${rawBody}` : rawBody;
+          const mergedTags = Array.from(new Set([...(d.tags || []), ...autoTags])).slice(0, 6);
+
+          state.posts.unshift({
+            id: 'post_' + Date.now(),
+            title: finalTitle,
+            body: finalBody,
+            author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+            category: d.category,
+            topicTags: mergedTags,
+            mediaList: (d.mediaList || []).slice(0, 4),
+            createdAt: '刚刚',
+            viewCount: 1,
+            likeCount: 0,
+            bookmarkCount: 0,
+            isLiked: false,
+            isBookmarked: false,
+            isMine: true,
+            allowComments: d.allowComments,
+            price: finalPrice,
+            moodTag: finalMood,
+            location: d.location || undefined,
+            eventTime: d.eventTime || undefined,
+            comments: []
+          });
+          recalculateHotTopicsForDay(getLocalDayKey());
+          saveState();
+          const catTitle = (D.CATEGORIES[d.category] || {}).titleCn || '树窝';
+          nav.pubDraft = null;
+          popScreen();
+          if (nav.stack.length === 0) {
+            nav.activeTab = 'home';
+            state.homeTab = 'LATEST';
+          }
+          render();
+          showToast('已匿名发布至「' + catTitle + '」');
         });
-        saveState();
-        nav.modal = null;
-        if (nav.stack.length === 0) nav.activeTab = 'home';
-        state.homeTab = 'LATEST';
-        render();
-        showToast('帖子已匿名发布到树窝');
         return;
       }
 
@@ -2978,10 +3899,27 @@
         return;
       }
       if (act === 'resetVerifyDemo') {
+        clearVerifyAuditTimers();
+        nav.verifyAuditStep = 0;
+        state.verificationStatus = 'UNVERIFIED';
         state.persona.isVerified = false;
+        state.verificationRecord = {
+          identityType: state.persona.identityType || '在读学生',
+          proofType: '学生证',
+          proofLabel: '',
+          proofDataUrl: '',
+          rejectReason: ''
+        };
+        nav.verifyDraft = {
+          identityType: state.persona.identityType || '在读学生',
+          proofType: '学生证',
+          proofLabel: '',
+          proofDataUrl: '',
+          agreedPolicy: false
+        };
         saveState();
         render();
-        showToast('已重置为未认证状态');
+        showToast('已重置为未认证访客状态');
         return;
       }
       if (act === 'clearLocalCache') {
@@ -3003,6 +3941,9 @@
   function boot() {
     applyTheme();
     buildHollowLogos();
+    // Silently compute today's hot topics ranking & arm 00:00 daily rollover
+    recalculateHotTopicsForDay(getLocalDayKey());
+    scheduleSilentMidnightHotTopics();
 
     // Render splash hollow logo
     const splashLogo = document.getElementById('splash-logo-img');
@@ -3023,12 +3964,17 @@
       fab.addEventListener('click', () => {
         const top = nav.stack[nav.stack.length - 1];
         if (top && top.name === 'seniorExperience') {
-          nav.modal = { type: 'createSenior', data: { cohort: '2024届', category: '留学', body: '' } };
-          render();
+          requireVerified('在学长学姐说发帖', () => {
+            nav.modal = { type: 'createSenior', data: { cohort: '2024届', category: '留学', body: '' } };
+            render();
+          });
           return;
         }
-        const cat = (top && top.name === 'categoryFeed') ? top.params.catKey : 'TREE_HOLE';
-        openPublishModal(cat);
+        if (top && top.name === 'categoryFeed') {
+          openPublishScreen(top.params.catKey, true);
+          return;
+        }
+        openPublishScreen('TREE_HOLE', false);
       });
     }
 

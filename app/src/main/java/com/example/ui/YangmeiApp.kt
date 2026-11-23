@@ -62,14 +62,15 @@ object Routes {
     const val HOT_TOPICS = "hot_topics"
     const val TOPIC_DETAIL = "topic/{tag}"
     const val POST_DETAIL = "post/{postId}"
-    const val PUBLISH = "publish/{category}"
+    const val PUBLISH = "publish/{category}?locked={locked}"
     const val CATEGORY_FEED = "category/{category}"
     const val PROFILE_COLLECTION = "profile_collection/{type}"
     const val SETTINGS = "settings"
 
     fun postDetail(postId: String) = "post/$postId"
     fun topicDetail(tag: String) = "topic/${Uri.encode(tag)}"
-    fun publish(category: PostCategory = PostCategory.CAMPUS_RANT) = "publish/${category.name}"
+    fun publish(category: PostCategory = PostCategory.TREE_HOLE, locked: Boolean = false) =
+        "publish/${category.name}?locked=$locked"
     fun categoryFeed(category: PostCategory) = "category/${category.name}"
     fun experienceDetail(articleId: String) = "experiences/$articleId"
     fun profileCollection(type: ProfileCollectionType) = "profile_collection/${type.name}"
@@ -120,10 +121,10 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
         }
     }
 
-    fun openComposeDirect(category: PostCategory = PostCategory.TREE_HOLE) {
+    fun openComposeDirect(category: PostCategory = PostCategory.TREE_HOLE, locked: Boolean = false) {
         viewModel.requireVerified("发布校园内容") {
             viewModel.startEditingDraft(null)
-            navController.navigate(Routes.publish(category))
+            navController.navigate(Routes.publish(category, locked = locked))
         }
     }
 
@@ -273,13 +274,21 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                         // 5. Publish
                         composable(
                             route = Routes.PUBLISH,
-                            arguments = listOf(navArgument("category") { type = NavType.StringType })
+                            arguments = listOf(
+                                navArgument("category") { type = NavType.StringType },
+                                navArgument("locked") {
+                                    type = NavType.BoolType
+                                    defaultValue = false
+                                }
+                            )
                         ) { entry ->
                             val catName = entry.arguments?.getString("category")
-                            val initialCat = PostCategory.entries.firstOrNull { it.name == catName } ?: PostCategory.CAMPUS_RANT
+                            val initialCat = PostCategory.entries.firstOrNull { it.name == catName } ?: PostCategory.TREE_HOLE
+                            val isLocked = entry.arguments?.getBoolean("locked") ?: false
                             PublishScreen(
                                 uiState = uiState,
                                 initialCategory = initialCat,
+                                isPartitionLocked = isLocked,
                                 onClose = {
                                     viewModel.startEditingDraft(null)
                                     navController.popBackStack()
@@ -367,8 +376,7 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                                 onSubmitVerification = { type, proofDesc, proofUri ->
                                     viewModel.submitCampusVerification(type, proofDesc, proofUri)
                                 },
-                                onSimulateApprove = { viewModel.simulateVerificationResult(true) },
-                                onSimulateReject = { viewModel.simulateVerificationResult(false) },
+                                onCancelReview = { viewModel.cancelVerificationReview() },
                                 onResetForDemo = { viewModel.resetVerificationForDemo() },
                                 onEnterCommunity = { navController.popBackStack() }
                             )
@@ -470,7 +478,7 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                                 category = category,
                                 uiState = uiState,
                                 onBack = { navController.popBackStack() },
-                                onComposeInCategory = { c -> openComposeDirect(c) },
+                                onComposeInCategory = { c -> openComposeDirect(c, locked = true) },
                                 onOpenPost = { postId -> openPostDetail(postId) },
                                 onOpenTopic = { tag -> navController.navigate(Routes.topicDetail(tag)) },
                                 onLikePost = { viewModel.togglePostLike(it) },

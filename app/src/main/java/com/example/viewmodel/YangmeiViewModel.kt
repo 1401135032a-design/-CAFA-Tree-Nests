@@ -8,9 +8,12 @@ import com.example.ai.AiStatsUiState
 import com.example.ai.CampusAiStatsService
 import com.example.data.*
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.Locale
 import kotlin.random.Random
 
 data class YangmeiUiState(
@@ -30,7 +33,8 @@ data class YangmeiUiState(
     val editingDraft: Post? = null,
     val wechatDms: Map<String, List<WechatDmMessage>> = emptyMap(),
     val aiStatsState: AiStatsUiState = AiStatsUiState.Idle,
-    val isRefreshing: Boolean = false
+    val isRefreshing: Boolean = false,
+    val verificationAuditStep: Int = 0
 ) {
     val isVerified: Boolean get() = verificationStatus == VerificationStatus.VERIFIED
     val unreadNotificationCount: Int get() = notifications.count { it.isUnread }
@@ -70,6 +74,8 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
     private val _wechatDms = MutableStateFlow<Map<String, List<WechatDmMessage>>>(emptyMap())
     private val _aiStatsState = MutableStateFlow<AiStatsUiState>(AiStatsUiState.Idle)
     private val _isRefreshing = MutableStateFlow(false)
+    private val _verificationAuditStep = MutableStateFlow(0)
+    private var verificationAuditJob: Job? = null
 
     private val contentState = combine(
         repository.posts,
@@ -105,8 +111,8 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         contentState,
         identityState,
         transientState,
-        _isRefreshing
-    ) { content, identity, transient, refreshing ->
+        combine(_isRefreshing, _verificationAuditStep) { r, step -> r to step }
+    ) { content, identity, transient, (refreshing, auditStep) ->
         YangmeiUiState(
             posts = content.posts,
             drafts = content.drafts,
@@ -124,7 +130,8 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
             editingDraft = transient.editingDraft,
             wechatDms = transient.wechatDms,
             aiStatsState = transient.aiStatsState,
-            isRefreshing = refreshing
+            isRefreshing = refreshing,
+            verificationAuditStep = auditStep
         )
     }.stateIn(
         scope = viewModelScope,
@@ -141,6 +148,40 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             repository.hydrateFromPreferences()
+            repository.refreshDailyHotTopics(currentLocalDayKey())
+        }
+        startSilentMidnightHotTopicsScheduler()
+    }
+
+    private fun currentLocalDayKey(): String {
+        val cal = Calendar.getInstance()
+        return String.format(
+            Locale.US,
+            "%04d-%02d-%02d",
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH)
+        )
+    }
+
+    private fun millisUntilNextMidnight(): Long {
+        val now = Calendar.getInstance()
+        val next = Calendar.getInstance().apply {
+            add(Calendar.DAY_OF_YEAR, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 1)
+            set(Calendar.MILLISECOND, 0)
+        }
+        return (next.timeInMillis - now.timeInMillis).coerceAtLeast(1_000L)
+    }
+
+    private fun startSilentMidnightHotTopicsScheduler() {
+        viewModelScope.launch {
+            while (true) {
+                delay(millisUntilNextMidnight())
+                repository.refreshDailyHotTopics(currentLocalDayKey())
+            }
         }
     }
 
@@ -252,6 +293,7 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                 comfortTag = comfortTag
             )
             repository.addComment(postId, comment)
+            repository.recalculateHotTopicsForDay(currentLocalDayKey())
             showToast(if (comfortTag != null) "已送出「$comfortTag」" else "评论已发布")
         }
     }
@@ -365,6 +407,7 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                     repository.deleteDraft(existingDraft.id)
                 }
                 repository.insertPost(newPost)
+                repository.recalculateHotTopicsForDay(currentLocalDayKey())
                 showToast("已匿名发布至「${category.titleCn}」")
             }
             _editingDraft.value = null
@@ -397,26 +440,28 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         suitableTag: String,
         onSuccess: () -> Unit
     ) {
-        if (content.trim().length < 2) {
-            showToast("请写下简短的真实上课感受")
-            return
+        requireVerified("发布选课评价") {
+            if (content.trim().length < 2) {
+                showToast("请写下简短的真实上课感受")
+                return@requireVerified
+            }
+            val review = CourseReview(
+                id = "cr_${System.currentTimeMillis()}",
+                author = activePostingPersona(),
+                semester = semester.ifBlank { "2026 春季" },
+                content = content.trim(),
+                workload = workload.coerceIn(1, 5),
+                difficulty = difficulty.coerceIn(1, 5),
+                recommend = recommend.coerceIn(1, 5),
+                attendanceMode = attendanceMode,
+                examFormat = examFormat,
+                suitableTag = suitableTag,
+                createdAt = "刚刚"
+            )
+            repository.addCourseReview(courseId, review)
+            showToast("评分与回答已计入课程综合结果")
+            onSuccess()
         }
-        val review = CourseReview(
-            id = "cr_${System.currentTimeMillis()}",
-            author = activePostingPersona(),
-            semester = semester.ifBlank { "2026 春季" },
-            content = content.trim(),
-            workload = workload.coerceIn(1, 5),
-            difficulty = difficulty.coerceIn(1, 5),
-            recommend = recommend.coerceIn(1, 5),
-            attendanceMode = attendanceMode,
-            examFormat = examFormat,
-            suitableTag = suitableTag,
-            createdAt = "刚刚"
-        )
-        repository.addCourseReview(courseId, review)
-        showToast("评分与回答已计入课程综合结果")
-        onSuccess()
     }
 
     fun createCommunityCourse(
@@ -435,47 +480,49 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         suitableTag: String,
         onSuccess: () -> Unit
     ) {
-        if (name.trim().isEmpty()) {
-            showToast("请填写课程名称")
-            return
+        requireVerified("共建选课档案") {
+            if (name.trim().isEmpty()) {
+                showToast("请填写课程名称")
+                return@requireVerified
+            }
+            val firstReview = CourseReview(
+                id = "cr_${System.currentTimeMillis()}",
+                author = activePostingPersona(),
+                semester = semester.ifBlank { "2026 春季" },
+                content = content.trim().ifBlank { "由校友/同学共建录入的选课评价。" },
+                workload = workload.coerceIn(1, 5),
+                difficulty = gradingFriendly.coerceIn(1, 5),
+                recommend = recommend.coerceIn(1, 5),
+                attendanceMode = attendanceMode,
+                examFormat = examFormat,
+                suitableTag = suitableTag,
+                createdAt = "刚刚"
+            )
+            val prefix = when (campus) {
+                "燕郊校区" -> "YJ"
+                "上海校区" -> "SH"
+                else -> "WJ"
+            }
+            val newCourse = CourseRecord(
+                id = "course_${System.currentTimeMillis()}",
+                code = "$prefix-${100 + repository.courses.value.size + 1}",
+                name = name.trim(),
+                instructor = instructor.trim().ifBlank { "待补充授课教师" },
+                campus = campus,
+                college = college,
+                major = courseType,
+                courseType = courseType,
+                workloadScore = workload.toFloat(),
+                difficultyScore = gradingFriendly.toFloat(),
+                recommendScore = recommend.toFloat(),
+                suitableFor = suitableTag,
+                summary = content.trim().ifBlank { "$campus · $college · 由大家评分共建" },
+                reviews = listOf(firstReview)
+            )
+            repository.addCourse(newCourse)
+            showToast("已成功共建「${newCourse.name}」选课评价")
+            onSuccess()
         }
-        val firstReview = CourseReview(
-            id = "cr_${System.currentTimeMillis()}",
-            author = activePostingPersona(),
-            semester = semester.ifBlank { "2026 春季" },
-            content = content.trim().ifBlank { "由校友/同学共建录入的选课评价。" },
-            workload = workload.coerceIn(1, 5),
-            difficulty = gradingFriendly.coerceIn(1, 5),
-            recommend = recommend.coerceIn(1, 5),
-            attendanceMode = attendanceMode,
-            examFormat = examFormat,
-            suitableTag = suitableTag,
-            createdAt = "刚刚"
-        )
-        val prefix = when (campus) {
-            "燕郊校区" -> "YJ"
-            "上海校区" -> "SH"
-            else -> "WJ"
-        }
-        val newCourse = CourseRecord(
-            id = "course_${System.currentTimeMillis()}",
-            code = "$prefix-${100 + repository.courses.value.size + 1}",
-            name = name.trim(),
-            instructor = instructor.trim().ifBlank { "待补充授课教师" },
-            campus = campus,
-            college = college,
-            major = courseType,
-            courseType = courseType,
-            workloadScore = workload.toFloat(),
-            difficultyScore = gradingFriendly.toFloat(),
-            recommendScore = recommend.toFloat(),
-            suitableFor = suitableTag,
-            summary = content.trim().ifBlank { "$campus · $college · 由大家评分共建" },
-            reviews = listOf(firstReview)
-        )
-        repository.addCourse(newCourse)
-        showToast("已成功共建「${newCourse.name}」选课评价")
-        onSuccess()
     }
 
     fun toggleExperienceLike(articleId: String) {
@@ -614,10 +661,12 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         proofUri: String?
     ) {
         if (proofUri.isNullOrBlank()) {
-            showToast("请先上传学生证、学生卡或录取通知书照片，上传即刻通过认证")
+            showToast("请先拍摄或上传央美身份凭证照片")
             return
         }
-        viewModelScope.launch {
+        verificationAuditJob?.cancel()
+        verificationAuditJob = viewModelScope.launch {
+            _verificationAuditStep.value = 1
             repository.submitVerification(
                 VerificationRecord(
                     identityType = identityType,
@@ -629,12 +678,29 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                     proofUri = proofUri
                 )
             )
+            delay(950)
+            _verificationAuditStep.value = 2
+            delay(1050)
+            _verificationAuditStep.value = 3
+            delay(900)
             repository.resolveVerification(approved = true, rejectReason = null)
-            showToast("央美本校认证已立即通过，现在可以发帖了")
+            _verificationAuditStep.value = 0
+            showToast("央美本校身份核验已通过，已为你解锁发帖与互动权限")
+        }
+    }
+
+    fun cancelVerificationReview() {
+        verificationAuditJob?.cancel()
+        _verificationAuditStep.value = 0
+        viewModelScope.launch {
+            repository.resetVerificationForTesting()
+            showToast("已撤回认证申请，可重新上传凭证")
         }
     }
 
     fun simulateVerificationResult(approved: Boolean, onDone: () -> Unit = {}) {
+        verificationAuditJob?.cancel()
+        _verificationAuditStep.value = 0
         viewModelScope.launch {
             delay(300)
             repository.resolveVerification(
@@ -646,6 +712,8 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resetVerificationForDemo() {
+        verificationAuditJob?.cancel()
+        _verificationAuditStep.value = 0
         viewModelScope.launch {
             repository.resetVerificationForTesting()
             showToast("已重置为未认证访客状态，可重新体验认证流程")

@@ -301,11 +301,6 @@ fun SearchScreen(
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
-                            Text(
-                                text = "实时更新",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
 
