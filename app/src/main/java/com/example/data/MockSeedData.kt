@@ -80,20 +80,7 @@ object MockSeedData {
     val courseSuitableOptions = listOf("水课", "跨专业友好", "适合进作品集", "轻松拿学分", "硬核高收获", "慎选避雷")
     val seniorCohortOptions = listOf("2026届", "2025届", "2024届", "2023届", "2022届", "2021届", "2020届及以前")
 
-    val anonymousNicknamePool = listOf(
-        "七号楼的松节油",
-        "花家地灰鸽",
-        "未干的丙烯层",
-        "美术馆北窗光",
-        "凌晨三点切卡纸",
-        "石膏像的阴影面",
-        "望京灰砖回声",
-        "版画室滚筒",
-        "无名素描纸",
-        "电教楼阶梯",
-        "潮湿的陶泥块",
-        "留白处的炭条"
-    )
+    val anonymousNicknamePool: List<String> = AnonymousNicknameLexicon.curatedClassics
 
     val treeHoleMoods = listOf("开心", "焦虑", "迷茫", "生气", "失落", "想念", "无聊", "求安慰")
     val treeHoleComfortOptions = listOf("抱抱", "我也一样", "给你一点建议", "陪你聊聊")

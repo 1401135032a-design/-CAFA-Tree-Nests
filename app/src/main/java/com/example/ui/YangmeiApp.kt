@@ -260,6 +260,9 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                                     onOpenCollection = { type -> navController.navigate(Routes.profileCollection(type)) },
                                     onRandomizeIdentity = { viewModel.randomizeAnonymousIdentity() },
+                                    onUpdatePersona = { nick, seed, onDone ->
+                                        viewModel.updatePersona(nick, seed, onDone)
+                                    },
                                     onToggleDarkTheme = { enabled ->
                                         viewModel.updateSettings { it.copy(darkTheme = enabled) }
                                     },

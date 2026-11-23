@@ -47,11 +47,13 @@ fun ProfileScreen(
     onOpenSettings: () -> Unit,
     onOpenCollection: (ProfileCollectionType) -> Unit,
     onRandomizeIdentity: () -> Unit,
+    onUpdatePersona: (nickname: String, avatarSeed: Int, onDone: () -> Unit) -> Unit = { _, _, _ -> },
     onToggleDarkTheme: (Boolean) -> Unit = {},
     onFabVisibilityChange: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val isDarkTheme = uiState.settings.darkTheme
+    var showPersonaEditor by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val myPostsCount = remember(uiState.posts) { uiState.posts.count { it.isMine } }
     val myCommentsCount = remember(uiState.posts, uiState.currentPersona) {
@@ -120,16 +122,58 @@ fun ProfileScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        AnonymousAvatar(seed = uiState.currentPersona.avatarSeed, size = 64.dp)
+                        Box(
+                            modifier = Modifier
+                                .clickable { showPersonaEditor = true }
+                                .testTag("profile_avatar_edit_trigger")
+                        ) {
+                            AnonymousAvatar(seed = uiState.currentPersona.avatarSeed, size = 66.dp)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .offset(x = 3.dp, y = 3.dp)
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(YangmeiPrimaryGradient)
+                                    .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = "更换形象",
+                                    tint = PaperWhite,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
                         Column(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = uiState.currentPersona.nickname,
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { showPersonaEditor = true }
+                                    .padding(vertical = 2.dp)
+                                    .testTag("profile_nickname_edit_trigger")
+                            ) {
+                                Text(
+                                    text = uiState.currentPersona.nickname,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = "修改昵称",
+                                    tint = if (isDarkTheme) AuroraLightIndigo else AuroraFocusIndigo,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -152,18 +196,42 @@ fun ProfileScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = "换一套形象",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDarkTheme) AuroraLightIndigo else AuroraFocusIndigo,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
-                                .border(1.3.dp, AuroraBorderGradient, RoundedCornerShape(10.dp))
-                                .clickable(onClick = onRandomizeIdentity)
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                                .testTag("randomize_persona_btn")
-                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(YangmeiPrimaryGradient)
+                                    .clickable { showPersonaEditor = true }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    .testTag("edit_persona_btn")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Edit,
+                                    contentDescription = null,
+                                    tint = PaperWhite,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "改昵称/形象",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = PaperWhite
+                                )
+                            }
+                            Text(
+                                text = "随机换一套",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isDarkTheme) AuroraLightIndigo else AuroraFocusIndigo,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
+                                    .border(1.3.dp, AuroraBorderGradient, RoundedCornerShape(10.dp))
+                                    .clickable(onClick = onRandomizeIdentity)
+                                    .padding(horizontal = 11.dp, vertical = 7.dp)
+                                    .testTag("randomize_persona_btn")
+                            )
+                        }
                     }
                 }
             }
@@ -332,6 +400,28 @@ fun ProfileScreen(
                     }
                 }
             }
+        }
+
+        if (showPersonaEditor) {
+            val usedNicknames = remember(uiState.posts) {
+                buildSet {
+                    uiState.posts.forEach { post ->
+                        add(post.author.nickname)
+                        post.comments.forEach { add(it.author.nickname) }
+                    }
+                }
+            }
+            PersonaEditorBottomSheet(
+                currentNickname = uiState.currentPersona.nickname,
+                currentAvatarSeed = uiState.currentPersona.avatarSeed,
+                usedCommunityNicknames = usedNicknames,
+                onDismiss = { showPersonaEditor = false },
+                onSave = { nick, seed ->
+                    onUpdatePersona(nick, seed) {
+                        showPersonaEditor = false
+                    }
+                }
+            )
         }
     }
 }

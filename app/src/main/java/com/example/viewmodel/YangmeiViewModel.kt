@@ -666,9 +666,15 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
     fun randomizeAnonymousIdentity() {
         viewModelScope.launch {
             val current = uiState.value.currentPersona
-            val candidates = MockSeedData.anonymousNicknamePool.filterNot { it == current.nickname }
-            val nextNick = candidates.randomOrNull() ?: "花家地灰鸽"
-            val nextSeed = Random.nextInt(100, 9999)
+            val usedNicknames = buildSet {
+                add(current.nickname)
+                uiState.value.posts.forEach { post ->
+                    add(post.author.nickname)
+                    post.comments.forEach { add(it.author.nickname) }
+                }
+            }
+            val nextNick = AnonymousNicknameLexicon.nextUniqueRandom(usedNicknames)
+            val nextSeed = AnonymousNicknameLexicon.sampleDistinctAvatarSeeds(1, excludeSeed = current.avatarSeed).first()
             repository.updateAnonymousPersona(
                 nickname = nextNick,
                 avatarSeed = nextSeed,
@@ -679,21 +685,43 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updateNickname(nickname: String) {
-        if (nickname.trim().length < 2) {
+    fun updatePersona(
+        nickname: String,
+        avatarSeed: Int,
+        onSuccess: () -> Unit = {}
+    ) {
+        val cleanNick = nickname.trim()
+        if (cleanNick.length < 2) {
             showToast("匿名昵称至少需要 2 个字")
+            return
+        }
+        if (cleanNick.length > 16) {
+            showToast("匿名昵称最多 16 个字")
+            return
+        }
+        val check = repository.moderationGateway.inspectText(cleanNick, uiState.value.settings.blockedKeywords)
+        if (!check.passed) {
+            showToast(check.reason ?: "昵称包含受限词汇，请修改后重试")
             return
         }
         viewModelScope.launch {
             val current = uiState.value.currentPersona
             repository.updateAnonymousPersona(
-                nickname = nickname.trim(),
-                avatarSeed = current.avatarSeed,
+                nickname = cleanNick,
+                avatarSeed = avatarSeed,
                 collegeTag = current.optionalCollegeTag,
                 yearTag = current.optionalYearTag
             )
-            showToast("匿名昵称已更新")
+            showToast("匿名昵称与形象已更新：$cleanNick")
+            onSuccess()
         }
+    }
+
+    fun updateNickname(nickname: String) {
+        updatePersona(
+            nickname = nickname,
+            avatarSeed = uiState.value.currentPersona.avatarSeed
+        )
     }
 
     fun updateSettings(transform: (UserSettings) -> UserSettings) {
