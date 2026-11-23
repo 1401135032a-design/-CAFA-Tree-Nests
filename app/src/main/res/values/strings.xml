@@ -15,4 +15,7 @@
     <string name="verify_title">进入树窝。</string>
     <string name="verify_subtitle">杨梅树窝是一个属于央美学生与校友的社区。认证身份后，你可以参与讨论、分享和互助。</string>
     <string name="compose_title">写下你的想法。</string>
+    <string name="app_creator">李明轩</string>
+    <string name="app_copyright">© 2026 李明轩（创建者）版权所有 · 保留一切权利</string>
+    <string name="app_copyright_statement">本应用「杨梅树窝」的创意策划、界面视觉与原创程序归创建者李明轩所有。未经创建者书面许可，禁止复制、修改分发或用于商业用途。</string>
 </resources>

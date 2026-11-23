@@ -17,11 +17,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.Coil
 import com.example.BuildConfig
+import com.example.R
 import com.example.data.UserSettings
-import com.example.ui.components.AnonymousAvatar
 import com.example.ui.components.EditorialHairline
 import com.example.ui.components.MonoTagChip
 import com.example.viewmodel.YangmeiUiState
@@ -45,7 +47,6 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var nicknameDraft by remember(uiState.currentPersona.nickname) { mutableStateOf(uiState.currentPersona.nickname) }
     var newKeyword by remember { mutableStateOf("") }
     var feedbackText by remember { mutableStateOf("") }
     var memRefreshTick by remember { mutableIntStateOf(0) }
@@ -77,62 +78,7 @@ fun SettingsScreen(
                 .testTag("settings_list"),
             contentPadding = PaddingValues(bottom = 64.dp)
         ) {
-            // 1. Anonymous Identity Settings
-            item(key = "sec_identity") {
-                Column {
-                    SettingsSectionHeader("匿名身份与外观")
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface)
-                            .padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
-                        ) {
-                            AnonymousAvatar(seed = uiState.currentPersona.avatarSeed, size = 54.dp)
-                            OutlinedButton(
-                                onClick = onRandomizeIdentity,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.heightIn(min = 44.dp)
-                            ) {
-                                Text("换一套随机形象")
-                            }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = nicknameDraft,
-                                onValueChange = { nicknameDraft = it },
-                                label = { Text("自定义匿名昵称") },
-                                singleLine = true,
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Button(
-                                onClick = { onUpdateNickname(nicknameDraft) },
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.heightIn(min = 52.dp)
-                            ) {
-                                Text("保存")
-                            }
-                        }
-                        SettingsToggleRow(
-                            title = "深灰墨黑阅读模式",
-                            subtitle = "切换浅灰与深灰界面主题",
-                            checked = uiState.settings.darkTheme,
-                            onCheckedChange = { checked -> onUpdateSettings { it.copy(darkTheme = checked) } }
-                        )
-                    }
-                    EditorialHairline()
-                }
-            }
-
-            // 2. Notification & Privacy Settings
+            // 1. Notification & Privacy Settings
             item(key = "sec_notify_privacy") {
                 Column {
                     SettingsSectionHeader("通知与隐私")
@@ -318,10 +264,10 @@ fun SettingsScreen(
                 }
             }
 
-            // 6. Version & Memory Capacity Management (for 5,000+ campus scale & future releases)
+            // 6. Version, Creator Copyright & Memory Capacity Management
             item(key = "sec_version_memory") {
                 Column {
-                    SettingsSectionHeader("版本与运行内存")
+                    SettingsSectionHeader("版本、版权与运行内存")
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -371,6 +317,33 @@ fun SettingsScreen(
                                 .testTag("settings_clear_cache_btn")
                         ) {
                             Text("清理图片内存与本地缓存")
+                        }
+
+                        EditorialHairline(thickness = 0.6.dp)
+
+                        // Copyright & Original Ownership Statement
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                                .testTag("settings_copyright_card"),
+                            verticalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.app_copyright),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = stringResource(R.string.app_copyright_statement),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }

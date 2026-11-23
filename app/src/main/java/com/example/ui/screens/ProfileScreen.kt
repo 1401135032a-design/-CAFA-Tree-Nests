@@ -19,9 +19,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.BuildConfig
+import com.example.R
 import com.example.data.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
@@ -398,6 +401,29 @@ fun ProfileScreen(
                         ProfileMenuRow("认证信息", uiState.verificationStatus.labelCn) { onOpenVerification() }
                         ProfileMenuRow("设置", "", showDivider = false) { onOpenSettings() }
                     }
+                }
+            }
+
+            // 5. Quiet Creator & Copyright Footer
+            item(key = "profile_copyright_footer") {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp, bottom = 12.dp, start = 20.dp, end = 20.dp)
+                        .testTag("profile_copyright_footer"),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = "杨梅树窝 v${BuildConfig.VERSION_NAME} · 创建者：${stringResource(R.string.app_creator)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f)
+                    )
+                    Text(
+                        text = stringResource(R.string.app_copyright),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outlineVariant
+                    )
                 }
             }
         }
