@@ -1,0 +1,10 @@
+{
+  "name": "杨梅树窝 · 央美校园社区",
+  "short_name": "杨梅树窝",
+  "description": "在杨梅树下，聊聊央美的生活。中央美术学院匿名校园社区与选课评价。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07070C",
+  "theme_color": "#6366F1",
+  "lang": "zh-CN"
+}

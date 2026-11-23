@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#6366F1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="杨梅树窝" />
+  <title>杨梅树窝 · 央美校园社区</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <style>
+    :root {
+      --bg: #F6F7FB;
+      --surface: #FFFFFF;
+      --surface-soft: #EEF1F8;
+      --text: #111827;
+      --text-sub: #64748B;
+      --border: rgba(99, 102, 241, 0.22);
+      --accent: #6366F1;
+      --accent-2: #EC4899;
+      --accent-3: #06B6D4;
+      --danger: #DC2626;
+      --danger-bg: rgba(220, 38, 38, 0.11);
+      --green: #16A34A;
+      --green-bg: rgba(22, 163, 74, 0.11);
+      --grad: linear-gradient(135deg, #6366F1 0%, #A855F7 50%, #EC4899 100%);
+      --aurora: radial-gradient(circle at 12% 0%, rgba(99,102,241,0.18), transparent 45%),
+                radial-gradient(circle at 88% 8%, rgba(236,72,153,0.15), transparent 42%),
+                radial-gradient(circle at 50% 18%, rgba(6,182,212,0.10), transparent 48%);
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+
+    body.dark {
+      --bg: #07070C;
+      --surface: #131522;
+      --surface-soft: #1B1E31;
+      --text: #F8FAFC;
+      --text-sub: #94A3B8;
+      --border: rgba(129, 140, 248, 0.30);
+      --accent: #818CF8;
+      --danger: #F87171;
+      --danger-bg: rgba(248, 113, 113, 0.16);
+      --green: #4ADE80;
+      --green-bg: rgba(74, 222, 128, 0.15);
+      --aurora: radial-gradient(circle at 14% 0%, rgba(99,102,241,0.28), transparent 48%),
+                radial-gradient(circle at 88% 6%, rgba(236,72,153,0.22), transparent 44%),
+                radial-gradient(circle at 50% 16%, rgba(6,182,212,0.14), transparent 50%);
+      --shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      background-image: var(--aurora);
+      background-attachment: fixed;
+    }
+
+    .app-shell {
+      max-width: 560px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding-bottom: 92px;
+      position: relative;
+    }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      background: color-mix(in srgb, var(--bg) 82%, transparent);
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .brand-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      background: var(--grad);
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 800;
+      font-size: 16px;
+      box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+    }
+
+    .brand-title {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: var(--grad);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin: 0;
+    }
+
+    .brand-sub {
+      font-size: 11px;
+      color: var(--text-sub);
+      letter-spacing: 0.8px;
+    }
+
+    .pill-btn {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 7px 13px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+    }
+    .pill-btn.primary {
+      background: var(--grad);
+      color: #fff;
+      border: none;
+    }
+
+    .h-scroll {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+    .h-scroll::-webkit-scrollbar { display: none; }
+
+    .chip {
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 6px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .chip.active {
+      background: var(--grad);
+      color: #fff;
+      border-color: transparent;
+      font-weight: 600;
+    }
+
+    .content {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1.2px solid var(--border);
+      border-radius: 16px;
+      padding: 15px;
+      box-shadow: var(--shadow);
+    }
+
+    .post-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .author-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .author-name {
+      font-size: 14px;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .meta {
+      font-size: 12px;
+      color: var(--text-sub);
+    }
+    .cat-tag {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 7px;
+      background: var(--surface-soft);
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    .cat-tag.warn {
+      background: var(--danger-bg);
+      color: var(--danger);
+    }
+    .cat-tag.green {
+      background: var(--green-bg);
+      color: var(--green);
+    }
+
+    .post-title {
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.42;
+      margin: 0 0 6px;
+    }
+    .post-body {
+      font-size: 14px;
+      line-height: 1.65;
+      color: var(--text);
+      opacity: 0.92;
+      margin: 0 0 10px;
+      white-space: pre-line;
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .mini-tag {
+      font-size: 11px;
+      color: var(--text-sub);
+      background: var(--surface-soft);
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    .action-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+      color: var(--text-sub);
+    }
+    .action-group { display: flex; gap: 16px; }
+    .act-btn {
+      background: none;
+      border: none;
+      color: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 4px 2px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .act-btn.liked { color: #EC4899; font-weight: 700; }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 4px 2px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .section-title .bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .section-title .bar::before {
+      content: "";
+      width: 4px;
+      height: 15px;
+      border-radius: 2px;
+      background: var(--grad);
+      display: inline-block;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      background: var(--surface-soft);
+      border-radius: 12px;
+      padding: 10px 8px;
+      text-align: center;
+      margin: 10px 0;
+    }
+    .metric-val {
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .metric-val.hl { color: var(--accent); }
+    .metric-lbl {
+      font-size: 11px;
+      color: var(--text-sub);
+      margin-top: 2px;
+    }
+
+    .notice-box {
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--text-sub);
+      background: var(--surface-soft);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+
+    .input {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+    }
+    .input:focus { border-color: var(--accent); }
+
+    .bottom-nav {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 560px;
+      z-index: 40;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-top: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
+    }
+    .nav-item {
+      border: none;
+      background: none;
+      color: var(--text-sub);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 4px 0;
+    }
+    .nav-item.active { color: var(--accent); }
+    .nav-icon { font-size: 19px; line-height: 1; }
+
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 7, 12, 0.58);
+      z-index: 60;
+      display: none;
+      align-items: flex-end;
+      justify-content: center;
+    }
+    .modal-backdrop.open { display: flex; }
+    .sheet {
+      width: 100%;
+      max-width: 560px;
+      max-height: 85vh;
+      overflow-y: auto;
+      background: var(--surface);
+      border-radius: 22px 22px 0 0;
+      padding: 18px 18px calc(24px + env(safe-area-inset-bottom));
+      box-shadow: 0 -10px 34px rgba(0, 0, 0, 0.3);
+    }
+
+    .review-item {
+      background: var(--surface-soft);
+      border-radius: 12px;
+      padding: 11px 12px;
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .footer-copy {
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-sub);
+      padding: 14px 12px 6px;
+      line-height: 1.6;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 44px 16px;
+      color: var(--text-sub);
+      font-size: 14px;
+    }
+
+    .toast {
+      position: fixed;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #111827;
+      color: #fff;
+      padding: 9px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      z-index: 90;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="toast" id="toast"></div>
+  <div class="app-shell">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" id="main"></main>
+
+    <nav class="bottom-nav" aria-label="主导航">
+      <button class="nav-item active" data-tab="home"><span class="nav-icon">✦</span><span>首页</span></button>
+      <button class="nav-item" data-tab="courses"><span class="nav-icon">◈</span><span>选课评价</span></button>
+      <button class="nav-item" data-tab="messages"><span class="nav-icon">✉</span><span>消息</span></button>
+      <button class="nav-item" data-tab="profile"><span class="nav-icon">◎</span><span>我的</span></button>
+    </nav>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop">
+    <div class="sheet" id="modalSheet"></div>
+  </div>
+
+  <script>
+    const PREFIXES = ["花家地","七号楼","北窗下","美术馆","灰砖墙","松节油","晚风里","燕郊的","电教楼","暗房中","石膏白","群青色","普鲁士","朱砂红","冷灰调","暖灰调","亚麻布","木工坊","丝网印","凌晨三点","阴天里","留白处","未干的","半透明","慢门的","显影液","调色盘","画室里","地下室","雕塑系","铜版画","水彩纸","生宣上","炭笔灰","刮刀痕","展厅里","胶片感","焦外光","素描本","泥塑房","窑变色","釉下青","金缮的","游牧的","静默的","漂浮的","柔和的","克制的","漫步的","发光的","拾光的","望京的"];
+    const NOUNS = ["灰鸽","橘猫","炭条","画框","滚筒","卡纸","陶泥","石膏","油画刀","猪鬃笔","调色刀","速写本","美纹纸","胶片卷","三脚架","定格帧","故事板","铅活字","木龙骨","白乳胶","丙烯层","水粉块","宣纸卷","松烟墨","青田印","圆口刀","木刨花","亚麻线","编织结","银盐片","安全灯","射灯影","展签纸","大画筒","小折凳","画架君","素描纸","潘通卡","基准线","透视点","阴影面","反光板","灰调子","肌理块","留白君","布展人","看展人","拉片人","夜行者","拾光者","手艺人","观察家","漫游者","小行星","回声"];
+    const AVATAR_COLORS = ["#6366F1","#EC4899","#0EA5E9","#10B981","#F59E0B","#8B5CF6","#EF4444","#14B8A6","#3B82F6","#D946EF"];
+
+    const state = {
+      nav: "home",
+      homeTab: "推荐",
+      courseCampus: "全部校区",
+      courseType: "全部类型",
+      courseQuery: "",
+      dark: localStorage.getItem("ym_dark") === "1",
+      persona: JSON.parse(localStorage.getItem("ym_persona") || '{"nickname":"花家地灰鸽","seed":512}'),
+      posts: [
+        {
+          id: "p1", category: "展览资讯", author: "美术馆地下一层", seed: 5077, time: "28分钟前",
+          title: "美术馆冬季材料展布展现场：那种灰调子的空间光线真的绝了",
+          body: "下午路过美术馆二层，刚好碰上装置组的同学在调最后的顶光。半透明纤维织物悬在清水混凝土墙面之前，下午三点半的斜阳一打进来，整个空间像一块缓缓流动的灰色切片。\n明天上午十点正式对校内开放，强烈建议带速写本或胶片机在工作日下午去。",
+          tags: ["#校园展览", "#艺术创作"], likes: 94, liked: false, location: "中央美术学院美术馆 2F",
+          comments: [
+            { author: "七号楼的松节油", text: "刚去完回来！二层转角那个石膏与麻布的拼接太迷人了。", isOp: false },
+            { author: "美术馆地下一层", text: "展期持续到 12 月 10 号哦，工作日下午三点光线最通透！", isOp: true }
+          ]
+        },
+        {
+          id: "p2", category: "学长学姐说", author: "灰砖墙下的慢门", seed: 3041, time: "1小时前",
+          title: "毕业三年后再回看在央美熬过的那些夜：最珍贵的是敢推翻重来",
+          body: "工作三年、在甲方和算法审美之间来回拉扯之后，才突然明白当年那种被逼着打破惯性的痛苦有多奢侈。致还在工作室和方案死磕的学弟学妹：允许自己画出“丑”的草稿，那是真正开始生长的地方。",
+          tags: ["#毕业之后", "#艺术生就业"], likes: 186, liked: false,
+          comments: [{ author: "切卡纸切到天亮", text: "正在对着一桌废卡纸怀疑人生，刷到这段话瞬间稳住了呼吸。", isOp: false }]
+        },
+        {
+          id: "p3", category: "闲置交换", author: "亚麻布底料", seed: 7103, time: "2小时前",
+          title: "【出闲置】温莎牛顿艺术家级油画颜料套装 + 猪鬃笔刷与调色刀",
+          body: "这学期转向综合材料与影像，去年囤的一整套温莎牛顿颜料和几把顺手的猪鬃画笔基本没怎么动。仅限花家地校内面交，美术馆门口或七号楼楼下都可，¥ 240 可小刀。",
+          tags: ["#闲置交换", "#画材"], likes: 29, liked: false, location: "花家地校区 · 7号楼",
+          comments: []
+        },
+        {
+          id: "p4", category: "校园互助", author: "望京阴天散步", seed: 8117, time: "昨天",
+          title: "周六上午拼车去燕郊建材市场买木龙骨和亚麻布，还差 2 位同学",
+          body: "已经约好熟悉的金杯师傅，早上 9:00 从北门出发，大概中午 1 点前返回花家地。车费 AA 人均 35 左右，顺路还可以一起买画框条。",
+          tags: ["#校园互助", "#宿舍生活"], likes: 21, liked: false, location: "花家地北门集合",
+          comments: []
+        },
+        {
+          id: "p5", category: "恋爱情感", author: "无题第14号草图", seed: 4057, time: "昨天",
+          title: "在央美谈恋爱是不是都自带“陪你刷白墙”属性？",
+          body: "昨天晚上十一点被对象拉去雕塑系工作室帮忙打磨石膏底座，两个人都满身白灰，最后蹲在楼道里分了一盒凉掉的炒河粉，觉得灰头土脸的校园生活也挺浪漫的。",
+          tags: ["#宿舍生活"], likes: 132, liked: false,
+          comments: [{ author: "七号楼的松节油", text: "是的，央美最高级别的浪漫就是布展前夜帮你拧膨胀螺丝。", isOp: false }]
+        }
+      ],
+      courses: [
+        { id:"c1", name:"视听语言", teacher:"李炫", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"影视动画与游戏", rec:4.9, grade:4.7, work:2.8, tags:["适合进作品集","硬核高收获"], summary:"游戏与影视圈资深大佬授课，课堂拉片干货极多，结课画故事板/分镜，作业量适中偏少、老师温柔负责。", reviews:["喜欢漫画、动画和影视分镜的无脑冲！上课带着拉片看电影全是干货，作业量适中偏少不肝。","专业能力很硬核，不过老师倾向引导大家按专业标准来，纯划水不建议。"] },
+        { id:"c2", name:"现成品剪辑", teacher:"宋松", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"影视动画与游戏", rec:4.8, grade:3.8, work:2.0, tags:["跨专业友好","轻松拿学分"], summary:"网上找现成素材剪辑视频，题材完全自由、不主张肝；宋老师和蔼好玩，零基础友好。", reviews:["宋松老师人超好、很和蔼，不咋肝也不主张硬肝，零基础去也很受照顾。","剪辑方向不固定非常自由，接受一切题材！用心做能拿高分。"] },
+        { id:"c3", name:"定格动画", teacher:"尹刚", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"影视动画与游戏", rec:4.8, grade:4.5, work:3.5, tags:["跨专业友好","适合进作品集"], summary:"和蔼有趣的老教授授课，喜欢手工制作体验极佳；拍摄定格动画需要耐心动手，给分合理偏高。", reviews:["尹老师超级好，爱跟学生唠嗑也用心讲知识，快退休了能选到很珍贵，强烈推荐！","课程很好玩，主要靠自己动手制作与逐帧拍摄，做得好一定高分。"] },
+        { id:"c4", name:"动漫乡村", teacher:"李礼 / 朱崇轩", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"影视动画与游戏", rec:3.7, grade:3.7, work:2.5, tags:["轻松拿学分","跨专业友好"], summary:"朱崇轩老师佛系温和、沟通友好；两位老师评价略有差异，整体压力较小。", reviews:["朱崇轩老师人很好、很佛系，不太会卡人，想学东西可以多主动找他交流。","李礼老师评价存在分歧，选课前可留意具体分组。"] },
+        { id:"c5", name:"摄影观察", teacher:"待补充（水课推荐）", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"影视动画与游戏", rec:3.6, grade:3.0, work:1.5, tags:["水课"], summary:"同学们在求水课推荐中提到的轻松课程：小组出勤压力低、后期上课时间灵活，但给分较玄学。", reviews:["比较水，小组里有一个人去就可以，后期上课时间非常灵活，不过给分比较玄学。"] },
+        { id:"c6", name:"绘本", teacher:"冯旭", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"绘画造型与绘本", rec:4.8, grade:4.2, work:3.0, tags:["跨专业友好","适合进作品集"], summary:"绘本方向人气口碑课！冯老师幽默专业、包容度极高，手绘板绘均可，微肝但上课很快乐，抢课难度高。", reviews:["各方面都特别好！冯老师很专业也很搞笑，包容度超大，手绘板绘都可以。","网课不是每节都开摄像头，主要是第一节和最后一节开。"] },
+        { id:"c7", name:"人物造型基础与艺用解剖", teacher:"张姿", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"绘画造型与绘本", rec:3.5, grade:4.2, work:5.0, tags:["硬核高收获","慎选避雷"], summary:"评价两极分化明显的硬核造型课：老师极度认真负责、认真交作业给分不错，但作业非常肝且风格偏强势。", reviews:["张姿老师非常负责也很护短，每次作业耗时 3-6 小时确实很肝，但确实学有所得。","外院同学普遍反映很肝且压力较大，喜欢宽松自由氛围的同学慎选。"] },
+        { id:"c8", name:"稍微素描", teacher:"苏海江", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"绘画造型与绘本", rec:1.2, grade:2.0, work:5.0, tags:["慎选避雷"], summary:"高能预警！文档中城院同学一致强烈劝退的超高强度素描课，作业量极大、耗时极长且打分体验普遍不佳。", reviews:["城院人公认的超高强度素描课，非常消耗精力与时间，非硬核素描爱好者慎重选择。"] },
+        { id:"c9", name:"木艺与设计", teacher:"白云泽", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"工艺首饰与木艺", rec:4.7, grade:4.7, work:3.8, tags:["跨专业友好","适合进作品集"], summary:"人气极高的手工木艺课！白老师温柔耐心、给分高且自由度好；纯手工削刻木头较费手，汇报要求宽松。", reviews:["白老师人特别好，温柔耐心又可爱，打分非常不错，闭眼选！","纯手工刻木头做玩偶较费手容易起茧，汇报频次稍多但要求宽松。"] },
+        { id:"c10", name:"传统工艺", teacher:"贺佳", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"工艺首饰与木艺", rec:4.5, grade:4.5, work:4.0, tags:["硬核高收获"], summary:"贺老师非常温柔有趣、给分很高，但平时汇报和任务节点较多、略微偏肝。", reviews:["贺老师很温柔有趣，给分不错，就是平时汇报有点多，稍微偏肝。"] },
+        { id:"c11", name:"织造方式研究", teacher:"杨华", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"工艺首饰与木艺", rec:3.8, grade:3.8, work:2.5, tags:["轻松拿学分","跨专业友好"], summary:"主要设计编织结构，自由度高、多数同学觉得活少分高且佛系；部分学期需节节课汇报进度并记考勤。", reviews:["老师上课挺佛系，自由度高，设计编织结构活少分高！","不同学期要求略有差异，部分学期需每节课汇报进度并记考勤。"] },
+        { id:"c12", name:"高级珠宝的“天下”——从地理角度看高级珠宝", teacher:"余瑶", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"工艺首饰与木艺", rec:4.0, grade:4.0, work:3.0, tags:["跨专业友好"], summary:"余瑶老师口碑很好，人温柔随和；该门课具体给分与作业量目前样本较少，欢迎继续补充。", reviews:["上过余瑶老师别的课，老师人非常温柔随和好沟通。"] },
+        { id:"c13", name:"空间盲盒", teacher:"张欣", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"空间建筑与材料", rec:4.5, grade:4.2, work:2.0, tags:["水课","跨专业友好"], summary:"创意导向的轻松好课！不拼工作量只看想法是否有趣，适合喜欢实验艺术与当代艺术的同学，老师超好。", reviews:["老师很有趣人超好，不看工作量大小只看创意有没有意思，比较轻松且给分不错。"] },
+        { id:"c14", name:"空间建构", teacher:"马华园", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"空间建筑与材料", rec:1.8, grade:2.5, work:5.0, tags:["慎选避雷"], summary:"多数同学劝退：作业多且临近结课仍易加量、方案需反复修改，上课时间常改至周末或晚间。", reviews:["经常不在白天正课时间上课，改到周日或晚间补课，方案反复改且节奏偏混乱，选前慎重。","老师思路偏跳跃，但喜欢有独立想法、愿意多交流的学生。"] },
+        { id:"c15", name:"艺术构造", teacher:"钱亮", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"空间建筑与材料", rec:2.0, grade:2.5, work:3.5, tags:["慎选避雷"], summary:"老师非常爱讲谐音梗，文档中有上过的同学直接标注避雷，建议选课前多了解具体要求。", reviews:["最爱讲谐音梗的老师，表格中有同学直接标注避雷，建议谨慎选择。"] },
+        { id:"c16", name:"梦幻“砼”时代", teacher:"张欣", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"空间建筑与材料", rec:null, grade:null, work:null, tags:["待补充评价"], summary:"混凝土材料相关跨院选修课，文档反馈去年未能成功开课，目前暂无实测打分。", reviews:[] },
+        { id:"c17", name:"潮品牌研究与创新图形", teacher:"胡雪琴", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"潮流品牌与IP设计", rec:4.8, grade:4.6, work:4.5, tags:["硬核高收获","适合进作品集"], summary:"含金量极高的前沿品牌图形课！胡老师温柔爱夸人、不常点名（轮到汇报需到场），课很肝但收获大且给分高。", reviews:["老师超棒很温柔经常夸学生，课程前沿含金量高，课肝但分高很有收获！","基本不点名，轮到自己汇报那天必须去，注意看教务备注是否限年级。"] },
+        { id:"c18", name:"IP形象设计与衍生品开发", teacher:"冯薇", campus:"燕郊校区", college:"城市设计学院", type:"跨院选修", group:"潮流品牌与IP设计", rec:3.5, grade:3.5, work:4.0, tags:["硬核高收获"], summary:"偏向真实项目实践的 IP 衍生开发课，不水，往期课程会结合老师承接的实际项目推进。", reviews:["不水！上次开课是直接跟着做老师接的实际项目，想攒落地经验可以考虑。"] },
+        { id:"c19", name:"艺术治疗的多场景实践", teacher:"康俐", campus:"望京本院", college:"艺术管理与教育学院", type:"跨院选修", group:"人文理论与策展", rec:4.0, grade:4.0, work:3.0, tags:["跨专业友好"], summary:"艺管院开设的跨学科实践课，对艺管以外的跨专业同学比较友好，最终打分可达 85+。", reviews:["对除艺管以外的其他专业同学挺友好的，打分还可以 85+。"] },
+        { id:"c20", name:"西美史", teacher:"邵亦扬", campus:"望京本院", college:"人文学院", type:"跨院选修", group:"人文理论与策展", rec:null, grade:null, work:null, tags:["待补充评价"], summary:"人文学院邵亦扬教授西方美术史课程，已收录至跨院选修清单，欢迎上过的同学补充体验。", reviews:[] }
+      ],
+      messages: []
+    };
+
+    function esc(str) {
+      return String(str == null ? "" : str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.classList.add("show");
+      clearTimeout(window.__t);
+      window.__t = setTimeout(() => el.classList.remove("show"), 2000);
+    }
+
+    function avatarStyle(seed) {
+      const c1 = AVATAR_COLORS[Math.abs(seed) % AVATAR_COLORS.length];
+      const c2 = AVATAR_COLORS[Math.abs(seed * 7 + 3) % AVATAR_COLORS.length];
+      return `background: linear-gradient(135deg, ${c1}, ${c2});`;
+    }
+
+    function rollNickname() {
+      const p = PREFIXES[Math.floor(Math.random() * PREFIXES.length)];
+      const n = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+      return p + n;
+    }
+
+    function applyTheme() {
+      document.body.classList.toggle("dark", state.dark);
+      localStorage.setItem("ym_dark", state.dark ? "1" : "0");
+    }
+
+    function savePersona() {
+      localStorage.setItem("ym_persona", JSON.stringify(state.persona));
+    }
+
+    function openModal(html) {
+      document.getElementById("modalSheet").innerHTML = html;
+      document.getElementById("modalBackdrop").classList.add("open");
+    }
+    function closeModal() {
+      document.getElementById("modalBackdrop").classList.remove("open");
+    }
+    document.getElementById("modalBackdrop").addEventListener("click", (e) => {
+      if (e.target.id === "modalBackdrop") closeModal();
+    });
+
+    function renderHome() {
+      const tabs = ["推荐", "最新", "话题", "闲置交换", "校园互助", "恋爱情感"];
+      document.getElementById("topbar").innerHTML = `
+        <div class="brand-row">
+          <div class="brand-left">
+            <div class="logo-mark">杨</div>
+            <div>
+              <h1 class="brand-title">杨梅树窝</h1>
+              <div class="brand-sub">YANGMEI TREE · CAFA</div>
+            </div>
+          </div>
+          <button class="pill-btn primary" onclick="openComposeModal()">＋ 发布</button>
+        </div>
+        <div class="h-scroll">
+          ${tabs.map(t => `<button class="chip ${state.homeTab===t?'active':''}" onclick="setHomeTab('${t}')">${t}</button>`).join("")}
+        </div>
+      `;
+
+      let list = [...state.posts];
+      if (state.homeTab === "推荐") list.sort((a,b) => b.likes - a.likes);
+      else if (state.homeTab === "话题") list = list.filter(p => p.tags.length > 0);
+      else if (state.homeTab !== "最新") list = list.filter(p => p.category === state.homeTab);
+
+      const main = document.getElementById("main");
+      if (!list.length) {
+        main.innerHTML = `<div class="empty">当前分区暂时还没有内容，点击右上角「＋ 发布」分享第一条吧。</div>`;
+        return;
+      }
+
+      main.innerHTML = list.map(p => `
+        <article class="card">
+          <div class="post-head">
+            <div class="author-wrap">
+              <div class="avatar" style="${avatarStyle(p.seed)}">${esc(p.author.slice(0,1))}</div>
+              <div>
+                <div class="author-name">${esc(p.author)}</div>
+                <div class="meta">${esc(p.time)}${p.location ? " · " + esc(p.location) : ""}</div>
+              </div>
+            </div>
+            <span class="cat-tag">${esc(p.category)}</span>
+          </div>
+          <h2 class="post-title">${esc(p.title)}</h2>
+          <p class="post-body">${esc(p.body)}</p>
+          <div class="tag-row">${p.tags.map(t => `<span class="mini-tag">${esc(t)}</span>`).join("")}</div>
+          <div class="action-row">
+            <div class="action-group">
+              <button class="act-btn ${p.liked?'liked':''}" onclick="toggleLike('${esc(p.id)}')">${p.liked?'♥':'♡'} ${p.likes}</button>
+              <button class="act-btn" onclick="openPostDetail('${esc(p.id)}')">💬 ${p.comments.length}</button>
+            </div>
+            <button class="act-btn" onclick="openPostDetail('${esc(p.id)}')">查看评论 ›</button>
+          </div>
+        </article>
+      `).join("");
+    }
+
+    function renderCourses() {
+      const campuses = ["全部校区", "望京本院", "燕郊校区", "上海校区"];
+      const types = ["全部类型", "跨院选修", "公共选修", "体育选修"];
+      document.getElementById("topbar").innerHTML = `
+        <div class="brand-row">
+          <div class="brand-left">
+            <h1 class="brand-title" style="font-size:20px;">选课评价</h1>
+          </div>
+          <span class="meta">共 ${state.courses.length} 门已收录</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <input class="input" placeholder="搜索课程名、授课教师或学院..." value="${esc(state.courseQuery)}" oninput="setCourseQuery(this.value)" />
+          <div class="h-scroll">${campuses.map(c => `<button class="chip ${state.courseCampus===c?'active':''}" onclick="setCourseCampus('${c}')">${c}</button>`).join("")}</div>
+          <div class="h-scroll">${types.map(t => `<button class="chip ${state.courseType===t?'active':''}" onclick="setCourseType('${t}')">${t}</button>`).join("")}</div>
+        </div>
+      `;
+
+      const q = state.courseQuery.trim().toLowerCase();
+      const filtered = state.courses.filter(c => {
+        const mc = state.courseCampus === "全部校区" || c.campus === state.courseCampus;
+        const mt = state.courseType === "全部类型" || c.type === state.courseType;
+        const mq = !q || c.name.toLowerCase().includes(q) || c.teacher.toLowerCase().includes(q) || c.college.toLowerCase().includes(q) || c.summary.toLowerCase().includes(q);
+        return mc && mt && mq;
+      });
+
+      const notice = (state.courseType === "全部类型" || state.courseType === "跨院选修")
+        ? `<div class="notice-box">ⓘ 选课规则提醒：跨校区线下课通常不可互选（望京本院与燕郊城院线下课不可互选，中法跨校暂不支持），具体以当学期教务系统备注为准。</div>`
+        : "";
+
+      const main = document.getElementById("main");
+      if (!filtered.length) {
+        main.innerHTML = notice + `<div class="empty">当前筛选条件下暂无选课评价。</div>`;
+        return;
+      }
+
+      const groups = {};
+      filtered.forEach(c => { (groups[c.group] = groups[c.group] || []).push(c); });
+
+      main.innerHTML = notice + Object.entries(groups).map(([gName, items]) => `
+        <div class="section-title">
+          <span class="bar">${gName}</span>
+          <span class="meta">${items.length} 门课程</span>
+        </div>
+        ${items.map(c => `
+          <article class="card" style="cursor:pointer;" onclick="openCourseDetail('${c.id}')">
+            <div class="post-head">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                <span class="cat-tag">${c.type}</span>
+                <span class="meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${c.campus} · ${c.college}</span>
+              </div>
+              <span class="meta">详情 ›</span>
+            </div>
+            <h3 class="post-title">${c.name}</h3>
+            <div class="meta" style="margin-bottom:6px;">授课教师：${c.teacher} · ${c.group}</div>
+            <p class="post-body" style="font-size:13px;margin-bottom:8px;">${c.summary}</p>
+            <div class="metrics-grid">
+              <div><div class="metric-val hl">${c.rec ? c.rec.toFixed(1) : "--"}</div><div class="metric-lbl">综合推荐</div></div>
+              <div><div class="metric-val">${c.grade ? c.grade.toFixed(1) : "--"}</div><div class="metric-lbl">给分友好</div></div>
+              <div><div class="metric-val">${c.work ? c.work.toFixed(1) : "--"}</div><div class="metric-lbl">作业强度</div></div>
+              <div><div class="metric-val">${c.reviews.length} 份</div><div class="metric-lbl">同学评价</div></div>
+            </div>
+            <div class="h-scroll">
+              ${c.tags.map(t => `<span class="cat-tag ${t==='慎选避雷'?'warn':t==='水课'?'green':''}">${t}</span>`).join("")}
+            </div>
+          </article>
+        `).join("")}
+      `).join("");
+    }
+
+    function renderMessages() {
+      document.getElementById("topbar").innerHTML = `
+        <div class="brand-row" style="margin-bottom:0;">
+          <h1 class="brand-title" style="font-size:20px;">消息</h1>
+        </div>
+      `;
+      document.getElementById("main").innerHTML = `<div class="empty">暂无消息</div>`;
+    }
+
+    function renderProfile() {
+      document.getElementById("topbar").innerHTML = `
+        <div class="brand-row" style="margin-bottom:0;">
+          <h1 class="brand-title" style="font-size:20px;">我的</h1>
+          <button class="pill-btn" onclick="toggleDarkMode()">${state.dark ? "☀ 浅色" : "☾ 深色"}</button>
+        </div>
+      `;
+      document.getElementById("main").innerHTML = `
+        <section class="card">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+            <div class="avatar" style="width:58px;height:58px;font-size:22px;border-radius:16px;${avatarStyle(state.persona.seed)}">${esc(state.persona.nickname.slice(0,1))}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:20px;font-weight:800;">${esc(state.persona.nickname)}</div>
+              <div class="meta" style="margin-top:4px;">社区内仅展示匿名形象</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="pill-btn primary" style="flex:1;justify-content:center;" onclick="openPersonaModal()">✎ 改昵称 / 形象</button>
+            <button class="pill-btn" style="flex:1;justify-content:center;" onclick="quickRandomPersona()">✦ 随机换一套</button>
+          </div>
+        </section>
+
+        <section class="card">
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px;">安装到手机桌面</div>
+          <div class="meta" style="line-height:1.65;">
+            • <b>iPhone (Safari)</b>：点击底部「分享」按钮 →「添加到主屏幕」，即可像 App 一样全屏打开。<br/>
+            • <b>Android (Chrome)</b>：点击浏览器菜单「安装应用 / 添加到主屏幕」，或在项目设置中直接导出原生 Android APK 安装包。
+          </div>
+        </section>
+
+        <section class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <span style="font-size:14px;font-weight:700;">当前版本</span>
+            <span class="mini-tag">v1.0.1</span>
+          </div>
+          <div class="notice-box">
+            <div style="font-weight:700;color:var(--text);margin-bottom:4px;">© 2026 李明轩（创建者）版权所有 · 保留一切权利</div>
+            本应用「杨梅树窝」的创意策划、界面视觉与原创程序归创建者李明轩所有。未经创建者书面许可，禁止复制、修改分发或用于商业用途。
+          </div>
+        </section>
+
+        <div class="footer-copy">
+          杨梅树窝 v1.0.1 · 创建者：李明轩<br/>© 2026 李明轩（创建者）版权所有 · 保留一切权利
+        </div>
+      `;
+    }
+
+    function render() {
+      applyTheme();
+      document.querySelectorAll(".nav-item").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.tab === state.nav);
+      });
+      if (state.nav === "home") renderHome();
+      else if (state.nav === "courses") renderCourses();
+      else if (state.nav === "messages") renderMessages();
+      else renderProfile();
+    }
+
+    window.setHomeTab = (t) => { state.homeTab = t; renderHome(); };
+    window.setCourseCampus = (c) => { state.courseCampus = c; renderCourses(); };
+    window.setCourseType = (t) => { state.courseType = t; renderCourses(); };
+    window.setCourseQuery = (q) => { state.courseQuery = q; renderCourses(); };
+    window.toggleDarkMode = () => { state.dark = !state.dark; render(); };
+
+    window.toggleLike = (id) => {
+      const p = state.posts.find(x => x.id === id);
+      if (!p) return;
+      p.liked = !p.liked;
+      p.likes += p.liked ? 1 : -1;
+      renderHome();
+    };
+
+    window.openPostDetail = (id) => {
+      const p = state.posts.find(x => x.id === id);
+      if (!p) return;
+      openModal(`
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <strong style="font-size:16px;">帖子详情</strong>
+          <button class="pill-btn" onclick="closeModal()">关闭</button>
+        </div>
+        <h3 class="post-title">${esc(p.title)}</h3>
+        <div class="meta" style="margin-bottom:10px;">${esc(p.author)} · ${esc(p.time)}</div>
+        <p class="post-body">${esc(p.body)}</p>
+        <div style="font-size:13px;font-weight:700;margin:14px 0 6px;">全部评论 (${p.comments.length})</div>
+        ${p.comments.length ? p.comments.map(c => `
+          <div class="review-item">
+            <div style="font-weight:700;margin-bottom:4px;">${esc(c.author)} ${c.isOp ? '<span class="cat-tag" style="margin-left:4px;">楼主</span>' : ''}</div>
+            <div>${esc(c.text)}</div>
+          </div>
+        `).join("") : '<div class="meta" style="padding:12px 0;">暂无评论，来写下第一条回复吧。</div>'}
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <input class="input" id="commentInput" placeholder="匿名发表评论..." />
+          <button class="pill-btn primary" onclick="submitComment('${esc(p.id)}')">发送</button>
+        </div>
+      `);
+    };
+
+    window.submitComment = (id) => {
+      const val = (document.getElementById("commentInput")?.value || "").trim();
+      if (!val) return showToast("请输入评论内容");
+      const p = state.posts.find(x => x.id === id);
+      if (!p) return;
+      p.comments.push({ author: state.persona.nickname, text: val, isOp: p.author === state.persona.nickname });
+      showToast("评论已发布");
+      openPostDetail(id);
+      if (state.nav === "home") renderHome();
+    };
+
+    window.openComposeModal = () => {
+      openModal(`
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <strong style="font-size:16px;">匿名发布新帖</strong>
+          <button class="pill-btn" onclick="closeModal()">关闭</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <select class="input" id="postCat">
+            <option value="校园互助">校园互助</option>
+            <option value="闲置交换">闲置交换</option>
+            <option value="恋爱情感">恋爱情感</option>
+            <option value="展览资讯">展览资讯</option>
+          </select>
+          <input class="input" id="postTitle" maxlength="30" placeholder="标题（简短明了）" />
+          <textarea class="input" id="postBody" rows="4" placeholder="分享你在央美的日常、想法或互助信息..."></textarea>
+          <input class="input" id="postTag" placeholder="自定义标签，例如 #央美日常（选填）" />
+          <button class="pill-btn primary" style="justify-content:center;padding:12px;" onclick="publishPost()">立即发布</button>
+        </div>
+      `);
+    };
+
+    window.publishPost = () => {
+      const title = document.getElementById("postTitle").value.trim();
+      const body = document.getElementById("postBody").value.trim();
+      const cat = document.getElementById("postCat").value;
+      const tagRaw = document.getElementById("postTag").value.trim();
+      if (!body) return showToast("请填写正文内容");
+      const tags = tagRaw ? [tagRaw.startsWith("#") ? tagRaw : "#" + tagRaw] : ["#" + cat];
+      state.posts.unshift({
+        id: "p_" + Date.now(),
+        category: cat,
+        author: state.persona.nickname,
+        seed: state.persona.seed,
+        time: "刚刚",
+        title: title || body.slice(0, 18),
+        body,
+        tags,
+        likes: 0,
+        liked: false,
+        comments: []
+      });
+      closeModal();
+      showToast("发布成功");
+      renderHome();
+    };
+
+    window.openCourseDetail = (id) => {
+      const c = state.courses.find(x => x.id === id);
+      if (!c) return;
+      openModal(`
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+          <span class="cat-tag">${esc(c.campus)} · ${esc(c.college)}</span>
+          <button class="pill-btn" onclick="closeModal()">关闭</button>
+        </div>
+        <h3 class="post-title" style="font-size:18px;">${esc(c.name)}</h3>
+        <div class="meta" style="margin-bottom:8px;">授课教师：${esc(c.teacher)} · ${esc(c.group)}</div>
+        <p class="post-body">${esc(c.summary)}</p>
+        <div style="font-size:13px;font-weight:700;margin:12px 0 6px;">同学真实评价 (${c.reviews.length})</div>
+        ${c.reviews.length ? c.reviews.map(r => `<div class="review-item">${esc(r)}</div>`).join("") : '<div class="meta" style="padding:10px 0;">暂无评价，欢迎成为第一位补充者。</div>'}
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <input class="input" id="courseReviewInput" placeholder="补充你的上课体验、考勤或给分建议..." />
+          <button class="pill-btn primary" onclick="submitCourseReview('${esc(c.id)}')">提交</button>
+        </div>
+      `);
+    };
+
+    window.submitCourseReview = (id) => {
+      const val = (document.getElementById("courseReviewInput")?.value || "").trim();
+      if (val.length < 2) return showToast("请写下简短的真实上课感受");
+      const c = state.courses.find(x => x.id === id);
+      if (!c) return;
+      c.reviews.unshift(val);
+      if (!c.rec) { c.rec = 4.0; c.grade = 4.0; c.work = 3.0; }
+      showToast("评价已提交");
+      openCourseDetail(id);
+      renderCourses();
+    };
+
+    window.quickRandomPersona = () => {
+      state.persona = { nickname: rollNickname(), seed: Math.floor(Math.random() * 90000) + 100 };
+      savePersona();
+      showToast("已切换匿名身份：" + state.persona.nickname);
+      renderProfile();
+    };
+
+    window.openPersonaModal = () => {
+      const samples = Array.from({ length: 6 }, () => rollNickname());
+      const seeds = Array.from({ length: 8 }, () => Math.floor(Math.random() * 90000) + 100);
+      openModal(`
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <strong style="font-size:16px;">自定义昵称与形象</strong>
+          <button class="pill-btn" onclick="closeModal()">关闭</button>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input class="input" id="nickInput" maxlength="16" value="${esc(state.persona.nickname)}" placeholder="输入 2~16 字昵称" />
+          <button class="pill-btn" onclick="document.getElementById('nickInput').value=rollNickname()">✦ 随机</button>
+        </div>
+        <div class="h-scroll" style="margin-bottom:14px;">
+          ${samples.map(s => `<button class="chip" onclick="document.getElementById('nickInput').value='${esc(s)}'">${esc(s)}</button>`).join("")}
+        </div>
+        <div class="meta" style="margin-bottom:8px;">点击挑选匿名形象：</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+          ${seeds.map(sd => `<button style="border:none;background:none;cursor:pointer;display:grid;place-items:center;" onclick="pickSeed(${sd})"><div class="avatar" style="width:48px;height:48px;border-radius:14px;${avatarStyle(sd)}">✦</div></button>`).join("")}
+        </div>
+        <button class="pill-btn primary" style="width:100%;justify-content:center;padding:12px;" onclick="saveCustomPersona()">保存昵称与形象</button>
+      `);
+    };
+
+    window.pickSeed = (sd) => {
+      state.persona.seed = sd;
+      showToast("已选中新形象");
+    };
+
+    window.saveCustomPersona = () => {
+      const nick = (document.getElementById("nickInput")?.value || "").trim();
+      if (nick.length < 2) return showToast("昵称至少需要 2 个字");
+      state.persona.nickname = nick;
+      savePersona();
+      closeModal();
+      showToast("昵称与形象已保存");
+      renderProfile();
+    };
+
+    document.querySelectorAll(".nav-item").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.nav = btn.dataset.tab;
+        render();
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>
