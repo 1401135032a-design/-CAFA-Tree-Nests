@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">杨梅树窝</string>
+    <string name="brand_en">YANGMEI TREE / CAFA COMMUNITY</string>
+    <string name="brand_slogan">在杨梅树下，聊聊央美的生活。</string>
+    <string name="brand_intro_line1">这里是杨梅树窝。</string>
+    <string name="brand_intro_line2">一个属于央美的数字聚集空间。</string>
+    <string name="nav_home">首页</string>
+    <string name="nav_discover">发现</string>
+    <string name="nav_messages">消息</string>
+    <string name="nav_profile">我的</string>
+    <string name="action_search">搜索</string>
+    <string name="action_publish">发布</string>
+    <string name="action_back">返回</string>
+    <string name="action_verify_now">立即认证</string>
+    <string name="verify_title">进入树窝。</string>
+    <string name="verify_subtitle">杨梅树窝是一个属于央美学生与校友的社区。认证身份后，你可以参与讨论、分享和互助。</string>
+    <string name="compose_title">写下你的想法。</string>
+</resources>

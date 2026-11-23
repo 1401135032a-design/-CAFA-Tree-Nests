@@ -1,0 +1,6 @@
+{
+  "name": "杨梅树窝",
+  "description": "面向中央美术学院在读学生与毕业校友的匿名校园社区 — YANGMEI TREE / CAFA COMMUNITY",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
