@@ -2863,7 +2863,7 @@
 
           <div class="pub-card">
             <div class="pub-card-title">
-              <span>${esc(catInfo.titleCn)}推荐标签</span>
+              <span>${esc(catDisplayName)}推荐标签</span>
               <span style="font-size:0.75rem;font-weight:500;color:var(--ink-muted);">已选 ${(d.tags || []).length}/5</span>
             </div>
             <div style="display:flex;gap:0.5rem;">
@@ -3821,7 +3821,12 @@
   function openPublishScreen(defaultCat, locked, initialTag) {
     requireVerified('发布校园内容', () => {
       nav.pubDraft = makeDefaultPubDraft(defaultCat || 'TREE_HOLE', Boolean(locked), initialTag);
-      pushScreen('publish', { category: nav.pubDraft.category, locked: nav.pubDraft.locked });
+      const top = nav.stack[nav.stack.length - 1];
+      if (top && top.name === 'publish') {
+        render({ resetScroll: true });
+      } else {
+        pushScreen('publish', { category: nav.pubDraft.category, locked: nav.pubDraft.locked });
+      }
     });
   }
 
@@ -4811,7 +4816,8 @@
     const fab = document.getElementById('main-fab');
     if (fab) {
       fab.innerHTML = ICONS.plus;
-      fab.addEventListener('click', () => {
+      fab.addEventListener('click', (e) => {
+        e.stopPropagation();
         const top = nav.stack[nav.stack.length - 1];
         if (top && top.name === 'seniorExperience') {
           requireVerified('在学长学姐说发帖', () => {
