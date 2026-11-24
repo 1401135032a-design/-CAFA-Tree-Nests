@@ -49,12 +49,14 @@ fun PostDetailScreen(
     onReportPost: (String, String) -> Unit,
     onRequestWechatDm: (onAllowed: () -> Unit) -> Unit = { it() },
     onSendWechatDm: (text: String, wechatId: String?) -> Unit = { _, _ -> },
-    onCopyWechatId: (String) -> Unit = {}
+    onCopyWechatId: (String) -> Unit = {},
+    onDeletePost: (() -> Unit)? = null
 ) {
     var commentText by remember { mutableStateOf("") }
     var replyTarget by remember { mutableStateOf<String?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
     var showWechatSheet by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     if (post == null) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -96,6 +98,18 @@ fun PostDetailScreen(
                     }
                 },
                 actions = {
+                    if (post.isMine && onDeletePost != null) {
+                        IconButton(
+                            onClick = { showDeleteConfirm = true },
+                            modifier = Modifier.testTag("detail_delete_post_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = "删除帖子",
+                                tint = VermilionRed
+                            )
+                        }
+                    }
                     IconButton(onClick = onSharePost) {
                         Icon(Icons.Outlined.Share, contentDescription = "分享")
                     }
@@ -583,6 +597,46 @@ fun PostDetailScreen(
             onDismiss = { showWechatSheet = false },
             onSend = onSendWechatDm,
             onCopyWechatId = onCopyWechatId
+        )
+    }
+
+    if (showDeleteConfirm && onDeletePost != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = {
+                Text(
+                    text = "确认删除这条帖子？",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "删除后将无法恢复，该帖下的评论与互动记录也会一并移除。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteConfirm = false },
+                    modifier = Modifier.testTag("detail_cancel_delete_btn")
+                ) {
+                    Text("取消")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDeletePost()
+                    },
+                    modifier = Modifier.testTag("detail_confirm_delete_btn")
+                ) {
+                    Text("确认删除", color = VermilionRed)
+                }
+            }
         )
     }
 }

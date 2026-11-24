@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.GppBad
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material.icons.outlined.PersonOutline
@@ -37,6 +38,7 @@ import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import com.example.BuildConfig
 import com.example.data.NotificationType
 import com.example.data.PostCategory
 import com.example.ui.components.AuroraBottomNavigationBar
@@ -45,6 +47,7 @@ import com.example.ui.components.AuroraNavTab
 import com.example.ui.components.RedNumberBadge
 import com.example.ui.components.VerificationGateDialog
 import com.example.ui.screens.*
+import com.example.ui.theme.VermilionRed
 import com.example.ui.theme.YangmeiTreeTheme
 import com.example.viewmodel.YangmeiViewModel
 
@@ -84,7 +87,9 @@ private val topLevelTabs = listOf(
 )
 
 @Composable
-fun YangmeiApp(viewModel: YangmeiViewModel) {
+fun YangmeiApp(
+    viewModel: YangmeiViewModel
+) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -322,6 +327,11 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                             arguments = listOf(navArgument("postId") { type = NavType.StringType })
                         ) { entry ->
                             val postId = entry.arguments?.getString("postId") ?: ""
+                            LaunchedEffect(postId) {
+                                if (postId.isNotBlank()) {
+                                    viewModel.observePostDetailComments(postId)
+                                }
+                            }
                             val post = uiState.posts.firstOrNull { it.id == postId }
                             PostDetailScreen(
                                 post = post,
@@ -347,7 +357,13 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                                 },
                                 onCopyWechatId = { wx ->
                                     viewModel.showToast("已复制微信号「$wx」，可前往微信沟通交易")
-                                }
+                                },
+                                onDeletePost = if (post?.isMine == true) {
+                                    {
+                                        viewModel.deletePost(postId)
+                                        navController.popBackStack()
+                                    }
+                                } else null
                             )
                         }
 
@@ -506,6 +522,7 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                                     navController.navigate(Routes.publish(draft.category))
                                 },
                                 onDeleteDraft = { viewModel.deleteDraft(it) },
+                                onDeletePost = { viewModel.deletePost(it) },
                                 onOpenTopic = { tag -> navController.navigate(Routes.topicDetail(tag)) },
                                 onLikePost = { viewModel.togglePostLike(it) },
                                 onBookmarkPost = { viewModel.togglePostBookmark(it) },
@@ -526,7 +543,10 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                                 onAddBlockedKeyword = { viewModel.addBlockedKeyword(it) },
                                 onRemoveBlockedKeyword = { viewModel.removeBlockedKeyword(it) },
                                 onResetVerificationDemo = { viewModel.resetVerificationForDemo() },
-                                onSendFeedback = { viewModel.showToast("感谢反馈，编辑部已收到你的匿名建议") },
+                                onSendFeedback = { msg ->
+                                    viewModel.submitFeedback(msg, BuildConfig.VERSION_NAME)
+                                    viewModel.showToast("建议已同步保存，正发送至 1401135032@qq.com")
+                                },
                                 onCacheCleared = { viewModel.showToast("已释放图片内存与本地缓存") }
                             )
                         }
@@ -572,6 +592,47 @@ fun YangmeiApp(viewModel: YangmeiViewModel) {
                     onGoVerify = {
                         viewModel.dismissVerificationGate()
                         navController.navigate(Routes.VERIFICATION)
+                    }
+                )
+            }
+
+            // Automatic Safety Moderation Block Dialog
+            val blockReason = uiState.moderationBlockReason
+            if (blockReason != null) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissModerationBlock() },
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Outlined.GppBad,
+                            contentDescription = "自动安全审查拦截",
+                            tint = VermilionRed,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    },
+                    title = {
+                        Text(
+                            text = "自动安全审查未通过",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "$blockReason\n\n请遵守国家法律法规及中央美术学院校园社区规范，修改文字或更换合规图片后再试。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = { viewModel.dismissModerationBlock() },
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = VermilionRed),
+                            modifier = Modifier.testTag("moderation_block_confirm_btn")
+                        ) {
+                            Text("返回修改")
+                        }
                     }
                 )
             }

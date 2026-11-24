@@ -1,12 +1,12 @@
 package com.example.viewmodel
 
-import android.app.Application
 import android.util.Log
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ai.AiStatsUiState
 import com.example.ai.CampusAiStatsService
 import com.example.data.*
+import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import java.util.Locale
-import kotlin.random.Random
 
 data class YangmeiUiState(
     val posts: List<Post> = emptyList(),
@@ -34,7 +33,9 @@ data class YangmeiUiState(
     val wechatDms: Map<String, List<WechatDmMessage>> = emptyMap(),
     val aiStatsState: AiStatsUiState = AiStatsUiState.Idle,
     val isRefreshing: Boolean = false,
-    val verificationAuditStep: Int = 0
+    val verificationAuditStep: Int = 0,
+    val isModerating: Boolean = false,
+    val moderationBlockReason: String? = null
 ) {
     val isVerified: Boolean get() = verificationStatus == VerificationStatus.VERIFIED
     val unreadNotificationCount: Int get() = notifications.count { it.isUnread }
@@ -63,9 +64,10 @@ data class YangmeiUiState(
         }
 }
 
-class YangmeiViewModel(application: Application) : AndroidViewModel(application) {
+class YangmeiViewModel(
+    private val repository: YangmeiRepository
+) : ViewModel() {
 
-    private val repository = YangmeiRepository(application.applicationContext)
     private val aiStatsService = CampusAiStatsService()
 
     private val _verificationGateReason = MutableStateFlow<String?>(null)
@@ -75,7 +77,10 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
     private val _aiStatsState = MutableStateFlow<AiStatsUiState>(AiStatsUiState.Idle)
     private val _isRefreshing = MutableStateFlow(false)
     private val _verificationAuditStep = MutableStateFlow(0)
+    private val _isModerating = MutableStateFlow(false)
+    private val _moderationBlockReason = MutableStateFlow<String?>(null)
     private var verificationAuditJob: Job? = null
+    private var commentListenerJob: Job? = null
 
     private val contentState = combine(
         repository.posts,
@@ -107,12 +112,21 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         TransientBundle(gateReason, toast, editingDraft, dms, aiStats)
     }
 
+    private val statusFlags = combine(
+        _isRefreshing,
+        _verificationAuditStep,
+        _isModerating,
+        _moderationBlockReason
+    ) { refreshing, auditStep, moderating, blockReason ->
+        StatusBundle(refreshing, auditStep, moderating, blockReason)
+    }
+
     val uiState: StateFlow<YangmeiUiState> = combine(
         contentState,
         identityState,
         transientState,
-        combine(_isRefreshing, _verificationAuditStep) { r, step -> r to step }
-    ) { content, identity, transient, (refreshing, auditStep) ->
+        statusFlags
+    ) { content, identity, transient, flags ->
         YangmeiUiState(
             posts = content.posts,
             drafts = content.drafts,
@@ -130,8 +144,10 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
             editingDraft = transient.editingDraft,
             wechatDms = transient.wechatDms,
             aiStatsState = transient.aiStatsState,
-            isRefreshing = refreshing,
-            verificationAuditStep = auditStep
+            isRefreshing = flags.refreshing,
+            verificationAuditStep = flags.auditStep,
+            isModerating = flags.moderating,
+            moderationBlockReason = flags.blockReason
         )
     }.stateIn(
         scope = viewModelScope,
@@ -150,7 +166,42 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
             repository.hydrateFromPreferences()
             repository.refreshDailyHotTopics(currentLocalDayKey())
         }
+        startRealtimeCloudPostsObserver()
         startSilentMidnightHotTopicsScheduler()
+    }
+
+    private fun startRealtimeCloudPostsObserver() {
+        viewModelScope.launch {
+            repository.observeSharedCloudPosts()
+                .catch { cause ->
+                    val firestoreEx = cause as? FirebaseFirestoreException
+                        ?: cause.cause as? FirebaseFirestoreException
+                    if (cause is CancellationException && firestoreEx == null) throw cause
+                    val ex = firestoreEx ?: (cause as? Exception ?: Exception(cause))
+                    handleFirestoreError(ex, OperationType.LIST, "posts")
+                }
+                .collect { cloudDtos ->
+                    repository.applyCloudPostsSnapshot(cloudDtos)
+                    repository.recalculateHotTopicsForDay(currentLocalDayKey())
+                }
+        }
+    }
+
+    fun observePostDetailComments(postId: String) {
+        commentListenerJob?.cancel()
+        commentListenerJob = viewModelScope.launch {
+            repository.observePostComments(postId)
+                .catch { cause ->
+                    val firestoreEx = cause as? FirebaseFirestoreException
+                        ?: cause.cause as? FirebaseFirestoreException
+                    if (cause is CancellationException && firestoreEx == null) throw cause
+                    val ex = firestoreEx ?: (cause as? Exception ?: Exception(cause))
+                    handleFirestoreError(ex, OperationType.LIST, "posts/$postId/comments")
+                }
+                .collect { liveComments ->
+                    repository.applyCloudComments(postId, liveComments)
+                }
+        }
     }
 
     private fun currentLocalDayKey(): String {
@@ -189,10 +240,33 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         if (_isRefreshing.value) return
         viewModelScope.launch {
             _isRefreshing.value = true
-            delay(450)
-            _isRefreshing.value = false
-            showToast("已刷新最新校园动态")
+            try {
+                val result = repository.forceRefreshFromCloud()
+                repository.recalculateHotTopicsForDay(currentLocalDayKey())
+                if (result.isSuccess) {
+                    showToast("已同步全校最新动态")
+                } else {
+                    showToast("已刷新本地动态，网络恢复后自动同步云端")
+                }
+            } finally {
+                _isRefreshing.value = false
+            }
         }
+    }
+
+    fun submitFeedback(content: String, appVersion: String) {
+        val clean = content.trim()
+        if (clean.isEmpty()) {
+            showToast("请先输入你的建议内容")
+            return
+        }
+        viewModelScope.launch {
+            repository.submitFeedbackToCloud(clean, appVersion)
+        }
+    }
+
+    fun dismissModerationBlock() {
+        _moderationBlockReason.value = null
     }
 
     fun consumeToast() {
@@ -277,24 +351,34 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         comfortTag: String? = null
     ) {
         requireVerified("发表评论与回复") {
-            val check = repository.moderationGateway.inspectText(content, uiState.value.settings.blockedKeywords)
-            if (!check.passed) {
-                showToast(check.reason ?: "内容不符合规范")
+            val quickCheck = repository.moderationGateway.inspectText(content, uiState.value.settings.blockedKeywords)
+            if (!quickCheck.passed) {
+                _moderationBlockReason.value = quickCheck.reason ?: "自动审查未通过：评论包含违规内容"
                 return@requireVerified
             }
-            val persona = activePostingPersona()
-            val comment = Comment(
-                id = "c_${System.currentTimeMillis()}",
-                postId = postId,
-                author = persona,
-                content = content.trim(),
-                createdAt = "刚刚",
-                replyToNickname = replyToNickname,
-                comfortTag = comfortTag
-            )
-            repository.addComment(postId, comment)
-            repository.recalculateHotTopicsForDay(currentLocalDayKey())
-            showToast(if (comfortTag != null) "已送出「$comfortTag」" else "评论已发布")
+            viewModelScope.launch {
+                val aiCheck = repository.moderationGateway.inspectSubmission(
+                    textParts = listOf(content),
+                    blockedKeywords = uiState.value.settings.blockedKeywords
+                )
+                if (!aiCheck.passed) {
+                    _moderationBlockReason.value = aiCheck.reason ?: "自动审查未通过：评论涉嫌违法或不良内容，禁止发布。"
+                    return@launch
+                }
+                val persona = activePostingPersona()
+                val comment = Comment(
+                    id = "c_${System.currentTimeMillis()}",
+                    postId = postId,
+                    author = persona,
+                    content = content.trim(),
+                    createdAt = "刚刚",
+                    replyToNickname = replyToNickname,
+                    comfortTag = comfortTag
+                )
+                repository.addComment(postId, comment)
+                repository.recalculateHotTopicsForDay(currentLocalDayKey())
+                showToast(if (comfortTag != null) "已送出「$comfortTag」" else "评论已通过自动审查并发布")
+            }
         }
     }
 
@@ -329,22 +413,59 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         asDraft: Boolean = false,
         onComplete: (Post) -> Unit = {}
     ) {
-        if (!asDraft) {
-            if (!uiState.value.isVerified) {
-                _verificationGateReason.value = "发布校园内容"
-                return
-            }
-            val check = repository.moderationGateway.inspectText(
-                body.ifBlank { title },
+        if (_isModerating.value) return
+        if (!asDraft && !uiState.value.isVerified) {
+            _verificationGateReason.value = "发布校园内容"
+            return
+        }
+
+        val allTextParts = buildList {
+            if (title.isNotBlank()) add(title)
+            if (body.isNotBlank()) add(body)
+            if (!location.isNullOrBlank()) add(location)
+            if (!price.isNullOrBlank()) add(price)
+            if (!pollQuestion.isNullOrBlank()) add(pollQuestion)
+            addAll(topicTags.filter { it.isNotBlank() })
+            addAll(pollOptions.filter { it.isNotBlank() })
+        }
+
+        if (!asDraft && allTextParts.isEmpty() && mediaUris.isEmpty()) {
+            showToast("请输入文字或添加图片后再发布")
+            return
+        }
+
+        // Instant synchronous local compliance check first
+        if (allTextParts.isNotEmpty()) {
+            val quickCheck = repository.moderationGateway.inspectText(
+                allTextParts.joinToString("\n"),
                 uiState.value.settings.blockedKeywords
             )
-            if (!check.passed) {
-                showToast(check.reason ?: "请输入有效内容")
+            if (!quickCheck.passed) {
+                _moderationBlockReason.value = quickCheck.reason ?: "自动审查未通过：内容涉嫌违法或不良信息，禁止发布。"
                 return
             }
         }
 
         viewModelScope.launch {
+            _isModerating.value = true
+            try {
+                // Full automatic text + multimodal image safety review before publishing
+                if (!asDraft || mediaUris.isNotEmpty()) {
+                    val fullCheck = repository.moderationGateway.inspectSubmission(
+                        textParts = allTextParts,
+                        mediaUris = mediaUris,
+                        blockedKeywords = uiState.value.settings.blockedKeywords
+                    )
+                    if (!fullCheck.passed) {
+                        _moderationBlockReason.value = fullCheck.reason
+                            ?: "自动审查未通过：文字或图片涉嫌违法违规及不良内容，禁止发布。"
+                        return@launch
+                    }
+                }
+            } finally {
+                _isModerating.value = false
+            }
+
             val uploadedMedia = mediaUris.mapIndexed { idx, uri ->
                 val remoteOrLocal = repository.storageGateway.uploadLocalMedia(uri)
                 PostMedia(
@@ -420,6 +541,12 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         showToast("草稿已删除")
     }
 
+    fun deletePost(postId: String) {
+        repository.deletePost(postId)
+        repository.recalculateHotTopicsForDay(currentLocalDayKey())
+        showToast("帖子已删除")
+    }
+
     // --- Courses & Experiences ---
 
     fun toggleCourseBookmark(courseId: String) {
@@ -445,22 +572,37 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                 showToast("请写下简短的真实上课感受")
                 return@requireVerified
             }
-            val review = CourseReview(
-                id = "cr_${System.currentTimeMillis()}",
-                author = activePostingPersona(),
-                semester = semester.ifBlank { "2026 春季" },
-                content = content.trim(),
-                workload = workload.coerceIn(1, 5),
-                difficulty = difficulty.coerceIn(1, 5),
-                recommend = recommend.coerceIn(1, 5),
-                attendanceMode = attendanceMode,
-                examFormat = examFormat,
-                suitableTag = suitableTag,
-                createdAt = "刚刚"
-            )
-            repository.addCourseReview(courseId, review)
-            showToast("评分与回答已计入课程综合结果")
-            onSuccess()
+            val quickCheck = repository.moderationGateway.inspectText(content, uiState.value.settings.blockedKeywords)
+            if (!quickCheck.passed) {
+                _moderationBlockReason.value = quickCheck.reason
+                return@requireVerified
+            }
+            viewModelScope.launch {
+                val aiCheck = repository.moderationGateway.inspectSubmission(
+                    textParts = listOf(content, semester),
+                    blockedKeywords = uiState.value.settings.blockedKeywords
+                )
+                if (!aiCheck.passed) {
+                    _moderationBlockReason.value = aiCheck.reason
+                    return@launch
+                }
+                val review = CourseReview(
+                    id = "cr_${System.currentTimeMillis()}",
+                    author = activePostingPersona(),
+                    semester = semester.ifBlank { "2026 春季" },
+                    content = content.trim(),
+                    workload = workload.coerceIn(1, 5),
+                    difficulty = difficulty.coerceIn(1, 5),
+                    recommend = recommend.coerceIn(1, 5),
+                    attendanceMode = attendanceMode,
+                    examFormat = examFormat,
+                    suitableTag = suitableTag,
+                    createdAt = "刚刚"
+                )
+                repository.addCourseReview(courseId, review)
+                showToast("评分与回答已通过自动审查并计入课程综合结果")
+                onSuccess()
+            }
         }
     }
 
@@ -485,43 +627,59 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                 showToast("请填写课程名称")
                 return@requireVerified
             }
-            val firstReview = CourseReview(
-                id = "cr_${System.currentTimeMillis()}",
-                author = activePostingPersona(),
-                semester = semester.ifBlank { "2026 春季" },
-                content = content.trim().ifBlank { "由校友/同学共建录入的选课评价。" },
-                workload = workload.coerceIn(1, 5),
-                difficulty = gradingFriendly.coerceIn(1, 5),
-                recommend = recommend.coerceIn(1, 5),
-                attendanceMode = attendanceMode,
-                examFormat = examFormat,
-                suitableTag = suitableTag,
-                createdAt = "刚刚"
-            )
-            val prefix = when (campus) {
-                "燕郊校区" -> "YJ"
-                "上海校区" -> "SH"
-                else -> "WJ"
+            val combined = listOf(name, instructor, content).filter { it.isNotBlank() }.joinToString("\n")
+            val quickCheck = repository.moderationGateway.inspectText(combined, uiState.value.settings.blockedKeywords)
+            if (!quickCheck.passed) {
+                _moderationBlockReason.value = quickCheck.reason
+                return@requireVerified
             }
-            val newCourse = CourseRecord(
-                id = "course_${System.currentTimeMillis()}",
-                code = "$prefix-${100 + repository.courses.value.size + 1}",
-                name = name.trim(),
-                instructor = instructor.trim().ifBlank { "待补充授课教师" },
-                campus = campus,
-                college = college,
-                major = courseType,
-                courseType = courseType,
-                workloadScore = workload.toFloat(),
-                difficultyScore = gradingFriendly.toFloat(),
-                recommendScore = recommend.toFloat(),
-                suitableFor = suitableTag,
-                summary = content.trim().ifBlank { "$campus · $college · 由大家评分共建" },
-                reviews = listOf(firstReview)
-            )
-            repository.addCourse(newCourse)
-            showToast("已成功共建「${newCourse.name}」选课评价")
-            onSuccess()
+            viewModelScope.launch {
+                val aiCheck = repository.moderationGateway.inspectSubmission(
+                    textParts = listOf(name, instructor, content),
+                    blockedKeywords = uiState.value.settings.blockedKeywords
+                )
+                if (!aiCheck.passed) {
+                    _moderationBlockReason.value = aiCheck.reason
+                    return@launch
+                }
+                val firstReview = CourseReview(
+                    id = "cr_${System.currentTimeMillis()}",
+                    author = activePostingPersona(),
+                    semester = semester.ifBlank { "2026 春季" },
+                    content = content.trim().ifBlank { "由校友/同学共建录入的选课评价。" },
+                    workload = workload.coerceIn(1, 5),
+                    difficulty = gradingFriendly.coerceIn(1, 5),
+                    recommend = recommend.coerceIn(1, 5),
+                    attendanceMode = attendanceMode,
+                    examFormat = examFormat,
+                    suitableTag = suitableTag,
+                    createdAt = "刚刚"
+                )
+                val prefix = when (campus) {
+                    "燕郊校区" -> "YJ"
+                    "上海校区" -> "SH"
+                    else -> "WJ"
+                }
+                val newCourse = CourseRecord(
+                    id = "course_${System.currentTimeMillis()}",
+                    code = "$prefix-${100 + repository.courses.value.size + 1}",
+                    name = name.trim(),
+                    instructor = instructor.trim().ifBlank { "待补充授课教师" },
+                    campus = campus,
+                    college = college,
+                    major = courseType,
+                    courseType = courseType,
+                    workloadScore = workload.toFloat(),
+                    difficultyScore = gradingFriendly.toFloat(),
+                    recommendScore = recommend.toFloat(),
+                    suitableFor = suitableTag,
+                    summary = content.trim().ifBlank { "$campus · $college · 由大家评分共建" },
+                    reviews = listOf(firstReview)
+                )
+                repository.addCourse(newCourse)
+                showToast("已成功共建「${newCourse.name}」选课评价")
+                onSuccess()
+            }
         }
     }
 
@@ -549,26 +707,41 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                 showToast("请输入要分享的经验或提问内容")
                 return@requireVerified
             }
-            val cleanCohort = cohort.trim().ifBlank { "2024届" }
-            val previewLine = cleanBody.lineSequence().firstOrNull { it.isNotBlank() }?.take(36) ?: cleanBody.take(36)
-            val nextIdx = repository.experiences.value.size + 1
-            val article = ExperienceArticle(
-                id = "exp_${System.currentTimeMillis()}",
-                indexCode = "ARCH // %02d".format(nextIdx),
-                title = previewLine,
-                summary = cleanBody.take(72),
-                body = cleanBody,
-                category = if (category == ExperienceCategory.ALL) ExperienceCategory.MAJOR_STUDY else category,
-                college = "央美匿名",
-                major = category.labelCn,
-                year = cleanCohort,
-                tags = listOf(category.labelCn, cleanCohort),
-                author = activePostingPersona(),
-                readMinutes = (cleanBody.length / 180).coerceAtLeast(1)
-            )
-            repository.addExperienceArticle(article)
-            showToast("已发布至「学长学姐说」（$cleanCohort）")
-            onSuccess()
+            val quickCheck = repository.moderationGateway.inspectText(cleanBody, uiState.value.settings.blockedKeywords)
+            if (!quickCheck.passed) {
+                _moderationBlockReason.value = quickCheck.reason
+                return@requireVerified
+            }
+            viewModelScope.launch {
+                val aiCheck = repository.moderationGateway.inspectSubmission(
+                    textParts = listOf(cleanBody),
+                    blockedKeywords = uiState.value.settings.blockedKeywords
+                )
+                if (!aiCheck.passed) {
+                    _moderationBlockReason.value = aiCheck.reason
+                    return@launch
+                }
+                val cleanCohort = cohort.trim().ifBlank { "2024届" }
+                val previewLine = cleanBody.lineSequence().firstOrNull { it.isNotBlank() }?.take(36) ?: cleanBody.take(36)
+                val nextIdx = repository.experiences.value.size + 1
+                val article = ExperienceArticle(
+                    id = "exp_${System.currentTimeMillis()}",
+                    indexCode = "ARCH // %02d".format(nextIdx),
+                    title = previewLine,
+                    summary = cleanBody.take(72),
+                    body = cleanBody,
+                    category = if (category == ExperienceCategory.ALL) ExperienceCategory.MAJOR_STUDY else category,
+                    college = "央美匿名",
+                    major = category.labelCn,
+                    year = cleanCohort,
+                    tags = listOf(category.labelCn, cleanCohort),
+                    author = activePostingPersona(),
+                    readMinutes = (cleanBody.length / 180).coerceAtLeast(1)
+                )
+                repository.addExperienceArticle(article)
+                showToast("已发布至「学长学姐说」（$cleanCohort）")
+                onSuccess()
+            }
         }
     }
 
@@ -580,18 +753,33 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
                 showToast("请先选择或填写你是哪一届的")
                 return@requireVerified
             }
-            repository.addExperienceComment(
-                articleId,
-                Comment(
-                    id = "ec_${System.currentTimeMillis()}",
-                    postId = articleId,
-                    author = activePostingPersona(),
-                    content = content.trim(),
-                    createdAt = "刚刚",
-                    cohortLabel = cleanCohort
+            val quickCheck = repository.moderationGateway.inspectText(content, uiState.value.settings.blockedKeywords)
+            if (!quickCheck.passed) {
+                _moderationBlockReason.value = quickCheck.reason
+                return@requireVerified
+            }
+            viewModelScope.launch {
+                val aiCheck = repository.moderationGateway.inspectSubmission(
+                    textParts = listOf(content),
+                    blockedKeywords = uiState.value.settings.blockedKeywords
                 )
-            )
-            showToast("已以「$cleanCohort」身份回复")
+                if (!aiCheck.passed) {
+                    _moderationBlockReason.value = aiCheck.reason
+                    return@launch
+                }
+                repository.addExperienceComment(
+                    articleId,
+                    Comment(
+                        id = "ec_${System.currentTimeMillis()}",
+                        postId = articleId,
+                        author = activePostingPersona(),
+                        content = content.trim(),
+                        createdAt = "刚刚",
+                        cohortLabel = cleanCohort
+                    )
+                )
+                showToast("已以「$cleanCohort」身份回复")
+            }
         }
     }
 
@@ -604,6 +792,13 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
             val cleanText = text.trim()
             val cleanWx = wechatId?.trim()?.takeIf { it.isNotEmpty() }
             if (cleanText.isEmpty() && cleanWx == null) return@requireVerified
+            if (cleanText.isNotEmpty()) {
+                val quickCheck = repository.moderationGateway.inspectText(cleanText, uiState.value.settings.blockedKeywords)
+                if (!quickCheck.passed) {
+                    _moderationBlockReason.value = quickCheck.reason
+                    return@requireVerified
+                }
+            }
 
             val me = activePostingPersona()
             val myMsg = WechatDmMessage(
@@ -769,10 +964,18 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         }
         val check = repository.moderationGateway.inspectText(cleanNick, uiState.value.settings.blockedKeywords)
         if (!check.passed) {
-            showToast(check.reason ?: "昵称包含受限词汇，请修改后重试")
+            _moderationBlockReason.value = check.reason ?: "昵称包含违规或受限词汇，请修改后重试"
             return
         }
         viewModelScope.launch {
+            val aiCheck = repository.moderationGateway.inspectSubmission(
+                textParts = listOf(cleanNick),
+                blockedKeywords = uiState.value.settings.blockedKeywords
+            )
+            if (!aiCheck.passed) {
+                _moderationBlockReason.value = aiCheck.reason ?: "昵称涉嫌违规内容，请更换后重试"
+                return@launch
+            }
             val current = uiState.value.currentPersona
             repository.updateAnonymousPersona(
                 nickname = cleanNick,
@@ -880,5 +1083,12 @@ class YangmeiViewModel(application: Application) : AndroidViewModel(application)
         val editingDraft: Post?,
         val wechatDms: Map<String, List<WechatDmMessage>>,
         val aiStatsState: AiStatsUiState
+    )
+
+    private data class StatusBundle(
+        val refreshing: Boolean,
+        val auditStep: Int,
+        val moderating: Boolean,
+        val blockReason: String?
     )
 }

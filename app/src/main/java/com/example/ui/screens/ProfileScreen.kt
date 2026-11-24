@@ -1,8 +1,11 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,11 +21,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.roundToInt
 import com.example.BuildConfig
 import com.example.R
 import com.example.data.*
@@ -532,12 +540,15 @@ fun ProfileCollectionScreen(
     onOpenPost: (String) -> Unit,
     onOpenDraft: (Post) -> Unit,
     onDeleteDraft: (String) -> Unit,
+    onDeletePost: (String) -> Unit = {},
     onOpenTopic: (String) -> Unit,
     onLikePost: (String) -> Unit,
     onBookmarkPost: (String) -> Unit,
     onSharePost: (Post) -> Unit,
     onVotePoll: (String, String) -> Unit
 ) {
+    var pendingDeletePost by remember { mutableStateOf<Post?>(null) }
+
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -563,46 +574,53 @@ fun ProfileCollectionScreen(
                     if (uiState.drafts.isEmpty()) {
                         item { EmptyCollectionNotice("暂无草稿", "发布页面支持随时暂存未写完的想法。") }
                     } else {
+                        item(key = "swipe_hint_drafts") {
+                            SwipeDeleteHintBar("向左滑动草稿卡片可快速删除")
+                        }
                         items(uiState.drafts, key = { it.id }) { draft ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surface)
-                                    .clickable { onOpenDraft(draft) }
+                            SwipeToRevealDeleteItem(
+                                onDelete = { onDeleteDraft(draft.id) }
                             ) {
                                 Column(
-                                    modifier = Modifier.padding(20.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .clickable { onOpenDraft(draft) }
                                 ) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                    Column(
+                                        modifier = Modifier.padding(20.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        MonoTagChip(text = "${draft.category.titleCn} · 草稿")
-                                        IconButton(onClick = { onDeleteDraft(draft.id) }) {
-                                            Icon(Icons.Outlined.Delete, contentDescription = "删除草稿", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            MonoTagChip(text = "${draft.category.titleCn} · 草稿")
+                                            IconButton(onClick = { onDeleteDraft(draft.id) }) {
+                                                Icon(Icons.Outlined.Delete, contentDescription = "删除草稿", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
                                         }
+                                        Text(
+                                            text = draft.title.ifBlank { "无标题草稿" },
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = draft.body,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "${draft.createdAt} · 点击继续编辑",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.outlineVariant
+                                        )
                                     }
-                                    Text(
-                                        text = draft.title.ifBlank { "无标题草稿" },
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = draft.body,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${draft.createdAt} · 点击继续编辑",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.outlineVariant
-                                    )
+                                    EditorialHairline()
                                 }
-                                EditorialHairline()
                             }
                         }
                     }
@@ -658,6 +676,9 @@ fun ProfileCollectionScreen(
                         }
                         else -> emptyList()
                     }
+                    val allowDelete = collectionType == ProfileCollectionType.MY_POSTS ||
+                        collectionType == ProfileCollectionType.MY_TRADES ||
+                        collectionType == ProfileCollectionType.MY_HELP
                     if (itemsList.isEmpty()) {
                         item {
                             EmptyCollectionNotice(
@@ -666,20 +687,183 @@ fun ProfileCollectionScreen(
                             )
                         }
                     } else {
+                        if (allowDelete) {
+                            item(key = "swipe_hint_posts") {
+                                SwipeDeleteHintBar("向左滑动帖子卡片可快速删除")
+                            }
+                        }
                         items(itemsList, key = { it.id }) { post ->
-                            EditorialPostCard(
-                                post = post,
-                                onPostClick = { onOpenPost(post.id) },
-                                onTopicClick = onOpenTopic,
-                                onLikeClick = { onLikePost(post.id) },
-                                onBookmarkClick = { onBookmarkPost(post.id) },
-                                onShareClick = { onSharePost(post) },
-                                onVoteOption = { optId -> onVotePoll(post.id, optId) }
-                            )
+                            val cardContent: @Composable () -> Unit = {
+                                EditorialPostCard(
+                                    post = post,
+                                    onPostClick = { onOpenPost(post.id) },
+                                    onTopicClick = onOpenTopic,
+                                    onLikeClick = { onLikePost(post.id) },
+                                    onBookmarkClick = { onBookmarkPost(post.id) },
+                                    onShareClick = { onSharePost(post) },
+                                    onVoteOption = { optId -> onVotePoll(post.id, optId) },
+                                    onDeleteClick = if (allowDelete && post.isMine) {
+                                        { pendingDeletePost = post }
+                                    } else null
+                                )
+                            }
+                            if (allowDelete && post.isMine) {
+                                SwipeToRevealDeleteItem(
+                                    onDelete = { pendingDeletePost = post },
+                                    content = cardContent
+                                )
+                            } else {
+                                cardContent()
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+
+    pendingDeletePost?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletePost = null },
+            containerColor = MaterialTheme.colorScheme.surface,
+            title = {
+                Text(
+                    text = "确认删除这条帖子？",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Text(
+                    text = "删除后将无法恢复，该帖下的评论与互动记录也会一并移除。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { pendingDeletePost = null },
+                    modifier = Modifier.testTag("cancel_delete_post_btn")
+                ) {
+                    Text("取消")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeletePost(target.id)
+                        pendingDeletePost = null
+                    },
+                    modifier = Modifier.testTag("confirm_delete_post_btn")
+                ) {
+                    Text("确认删除", color = VermilionRed)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SwipeDeleteHintBar(text: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.SwipeLeft,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.size(15.dp)
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.outlineVariant
+        )
+    }
+}
+
+@Composable
+private fun SwipeToRevealDeleteItem(
+    onDelete: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val actionWidthPx = with(LocalDensity.current) { 88.dp.toPx() }
+    var rawOffsetPx by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    val animatedOffsetPx by animateFloatAsState(
+        targetValue = rawOffsetPx,
+        animationSpec = spring(dampingRatio = 0.85f, stiffness = 420f),
+        label = "swipe_delete_offset"
+    )
+    val activeOffsetPx = if (isDragging) rawOffsetPx else animatedOffsetPx
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+    ) {
+        // Revealed vermilion-red delete button on the right edge
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(88.dp)
+                .fillMaxHeight()
+                .padding(vertical = 6.dp, horizontal = 4.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(VermilionRed)
+                .clickable {
+                    rawOffsetPx = 0f
+                    onDelete()
+                }
+                .testTag("swipe_reveal_delete_btn"),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = "删除",
+                    tint = PaperWhite,
+                    modifier = Modifier.size(22.dp)
+                )
+                Text(
+                    text = "删除",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = PaperWhite
+                )
+            }
+        }
+
+        // Foreground draggable card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(activeOffsetPx.roundToInt(), 0) }
+                .pointerInput(actionWidthPx) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragEnd = {
+                            isDragging = false
+                            rawOffsetPx = if (rawOffsetPx < -actionWidthPx * 0.42f) -actionWidthPx else 0f
+                        },
+                        onDragCancel = {
+                            isDragging = false
+                            rawOffsetPx = 0f
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            rawOffsetPx = (rawOffsetPx + dragAmount).coerceIn(-actionWidthPx, 0f)
+                        }
+                    )
+                }
+        ) {
+            content()
         }
     }
 }

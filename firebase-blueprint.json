@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "Post": {
+      "title": "Post",
+      "description": "Shared real-time campus community post with public feed visibility and per-post cryptographic delete verification.",
+      "type": "object",
+      "properties": {
+        "authorUid": { "type": "string", "description": "Public account identifier of the post author" },
+        "visibility": { "type": "string", "enum": ["public", "deleted"], "description": "Feed visibility status; public posts are visible to all users, deleted posts are tombstoned and unreadable" },
+        "deleteVerifier": { "type": "string", "description": "Optional lowercase SHA-256 hex of per-post deleteProof for author-only deletion" },
+        "deleteProof": { "type": "string", "description": "Write-only proof supplied only when transitioning visibility from public to deleted" },
+        "indexCode": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "category": { "type": "string" },
+        "layoutType": { "type": "string" },
+        "authorNickname": { "type": "string" },
+        "authorAvatarSeed": { "type": "integer" },
+        "authorIdentityType": { "type": "string" },
+        "authorVerified": { "type": "boolean" },
+        "topicTags": { "type": "array" },
+        "mediaUrls": { "type": "array" },
+        "viewCount": { "type": "integer" },
+        "likeCount": { "type": "integer" },
+        "bookmarkCount": { "type": "integer" },
+        "commentCount": { "type": "integer" },
+        "allowComments": { "type": "boolean" },
+        "price": { "type": "string" },
+        "tradeStatus": { "type": "string" },
+        "location": { "type": "string" },
+        "eventTime": { "type": "string" },
+        "contactHint": { "type": "string" },
+        "moodTag": { "type": "string" },
+        "pollQuestion": { "type": "string" },
+        "pollOptions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "authorUid", "visibility", "indexCode", "title", "body", "category",
+        "layoutType", "authorNickname", "authorAvatarSeed", "authorIdentityType",
+        "authorVerified", "topicTags", "mediaUrls", "viewCount", "likeCount",
+        "bookmarkCount", "commentCount", "allowComments", "createdAt", "updatedAt"
+      ]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Real-time comment under a campus community post.",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "postAuthorUid": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["public"] },
+        "authorNickname": { "type": "string" },
+        "authorAvatarSeed": { "type": "integer" },
+        "authorIdentityType": { "type": "string" },
+        "authorVerified": { "type": "boolean" },
+        "content": { "type": "string" },
+        "likes": { "type": "integer" },
+        "replyToNickname": { "type": "string" },
+        "comfortTag": { "type": "string" },
+        "cohortLabel": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "postId", "postAuthorUid", "authorUid", "visibility",
+        "authorNickname", "authorAvatarSeed", "authorIdentityType",
+        "authorVerified", "content", "likes", "createdAt"
+      ]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "Write-only suggestion log routed to 1401135032@qq.com.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "authorNickname": { "type": "string" },
+        "content": { "type": "string" },
+        "targetEmail": { "type": "string" },
+        "platform": { "type": "string", "enum": ["android", "web"] },
+        "appVersion": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "authorNickname", "content", "targetEmail",
+        "platform", "appVersion", "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/posts/{postId}": {
+      "schema": { "$ref": "#/entities/Post" },
+      "description": "Shared real-time campus feed posts."
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "#/entities/Comment" },
+      "description": "Real-time comments under a post."
+    },
+    "/feedbacks/{feedbackId}": {
+      "schema": { "$ref": "#/entities/Feedback" },
+      "description": "Write-only user suggestions."
+    }
+  }
+}

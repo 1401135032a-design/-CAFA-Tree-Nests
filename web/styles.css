@@ -704,17 +704,18 @@ html.dark .fluid-aurora-light {
   align-items: center;
   gap: 0.3125rem;
   flex-shrink: 0;
-  padding: 0.375rem 0.75rem;
+  height: 2.125rem;
+  padding: 0 0.75rem;
   border-radius: 0.625rem;
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
   color: var(--ink);
   background:
     linear-gradient(var(--surface-translucent), var(--surface-translucent)) padding-box,
     var(--aurora-grad) border-box;
   border: 1.2px solid transparent;
-  transition: transform 0.14s ease;
+  transition: transform 0.14s ease, color 0.15s ease;
 }
 
 .aurora-tab-pill:active { transform: scale(0.96); }
@@ -733,6 +734,47 @@ html.dark .fluid-aurora-light {
 }
 
 .aurora-tab-pill.active svg { color: #FFFFFF; }
+
+.cloud-sync-strip {
+  margin: 0 0.875rem 0.45rem;
+  padding: 0.48rem 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--surface-translucent);
+  border: 1px solid var(--outline-soft);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-secondary);
+}
+
+.cloud-sync-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+}
+
+.cloud-sync-dot.offline {
+  background: var(--indigo);
+}
+
+.cloud-sync-btn {
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #FFFFFF;
+  background: var(--aurora-grad);
+  flex-shrink: 0;
+}
+
+.cloud-sync-btn.subtle {
+  background: var(--surface-soft);
+  color: var(--active-tint);
+}
 
 /* Pull-to-refresh indicator */
 .ptr-indicator {
@@ -3088,3 +3130,146 @@ html.dark .pub-partition-hero {
   }
   .splash-title-char { opacity: 1; filter: none; }
 }
+
+/* My Posts Delete Action & Confirmation */
+.post-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.footer-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  min-height: 2.25rem;
+  padding: 0 0.5625rem;
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--vermilion);
+  background: rgba(239, 68, 68, 0.08);
+  transition: background 0.15s ease, transform 0.12s ease;
+}
+
+.footer-delete-btn svg {
+  width: 0.9375rem;
+  height: 0.9375rem;
+}
+
+.footer-delete-btn:active {
+  background: rgba(239, 68, 68, 0.18);
+  transform: scale(0.96);
+}
+
+.btn-danger-full {
+  flex: 1;
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  border-radius: 0.75rem;
+  background: var(--vermilion);
+  color: #FFFFFF;
+  font-size: 0.875rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Swipe-Left-to-Reveal-Delete (左滑删除) */
+.swipe-hint-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4375rem 1.125rem 0.25rem;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+}
+
+.swipe-delete-wrap {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  touch-action: pan-y;
+  user-select: none;
+}
+
+.swipe-delete-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 5.5rem;
+  background: var(--vermilion);
+  color: #FFFFFF;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  z-index: 1;
+}
+
+.swipe-delete-action svg {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+.swipe-delete-content {
+  position: relative;
+  z-index: 2;
+  background: var(--surface);
+  transform: translate3d(0, 0, 0);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.swipe-delete-wrap.swiping .swipe-delete-content {
+  transition: none;
+}
+
+.swipe-delete-wrap.open .swipe-delete-content {
+  transform: translate3d(-5.5rem, 0, 0);
+}
+
+/* Automatic Content Safety Moderation Banner & Modal */
+.safety-guard-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5625rem 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--surface-variant);
+  color: var(--on-surface-variant);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.safety-guard-banner svg {
+  width: 1rem;
+  height: 1rem;
+  color: var(--aurora-focus);
+  flex-shrink: 0;
+}
+
+.mod-block-badge {
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.875rem;
+  background: rgba(217, 56, 30, 0.12);
+  color: var(--vermilion);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.mod-block-badge svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+
+

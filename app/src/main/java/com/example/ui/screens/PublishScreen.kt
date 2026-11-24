@@ -169,15 +169,22 @@ fun PublishScreen(
             PostCategory.MARKETPLACE,
             PostCategory.OPPORTUNITY,
             PostCategory.LOST_FOUND,
-            PostCategory.MUTUAL_AID,
-            PostCategory.EXHIBITION,
-            PostCategory.ART_CREATION,
-            PostCategory.RELATIONSHIP
+            PostCategory.MUTUAL_AID
         )
     }
-    var selectedCategory by remember(draft, initialCategory) {
+    fun partitionDisplayName(cat: PostCategory): String =
+        if (cat == PostCategory.TREE_HOLE) "情绪树洞" else cat.titleCn
+
+    var selectedCategory by remember(draft, initialCategory, isPartitionLocked) {
         val candidate = draft?.category ?: initialCategory
-        mutableStateOf(if (publishPartitions.contains(candidate)) candidate else PostCategory.TREE_HOLE)
+        val resolved = if (isPartitionLocked) {
+            candidate
+        } else if (publishPartitions.contains(candidate)) {
+            candidate
+        } else {
+            PostCategory.TREE_HOLE
+        }
+        mutableStateOf(resolved)
     }
     val spec = remember(selectedCategory) { composeSpecFor(selectedCategory) }
     val isDarkTheme = MaterialTheme.colorScheme.background.red < 0.2f
@@ -320,7 +327,11 @@ fun PublishScreen(
                         AnonymousAvatar(seed = uiState.currentPersona.avatarSeed, size = 28.dp)
                         Column {
                             Text(
-                                text = if (isPartitionLocked) "发布到 · ${selectedCategory.titleCn}" else selectedCategory.titleCn,
+                                text = if (isPartitionLocked) {
+                                    "发布到 · ${partitionDisplayName(selectedCategory)}"
+                                } else {
+                                    partitionDisplayName(selectedCategory)
+                                },
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -340,19 +351,31 @@ fun PublishScreen(
                 actions = {
                     TextButton(
                         onClick = { submitPost(asDraft = true) },
+                        enabled = !uiState.isModerating,
                         modifier = Modifier.testTag("publish_save_draft_btn")
                     ) {
                         Text("存草稿", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Button(
                         onClick = { submitPost(asDraft = false) },
+                        enabled = !uiState.isModerating,
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                         modifier = Modifier
                             .padding(end = 10.dp)
                             .testTag("publish_submit_btn")
                     ) {
-                        Text(spec.ctaLabel, fontWeight = FontWeight.SemiBold)
+                        if (uiState.isModerating) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(15.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("审查中...", fontWeight = FontWeight.SemiBold)
+                        } else {
+                            Text(spec.ctaLabel, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)
@@ -437,6 +460,36 @@ fun PublishScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Automatic Legal & Safety Moderation Protection Strip
+            item(key = "publish_safety_guard_notice") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f))
+                        .padding(horizontal = 12.dp, vertical = 9.dp)
+                        .testTag("publish_safety_notice"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.VerifiedUser,
+                        contentDescription = null,
+                        tint = AuroraFocusIndigo,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = if (uiState.isModerating) {
+                            "正在进行文字与图片自动安全审查，请稍候..."
+                        } else {
+                            "已开启全自动安全审查：严禁发布违法违规、涉黄暴恐、诈骗或不良文字与图片"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // Top Partition Banner (locked single-partition) OR Partition Switcher (global entry)
             item(key = "partition_header_or_switcher") {
                 if (isPartitionLocked) {
@@ -510,7 +563,7 @@ fun PublishScreen(
                                     Text("选择发布分区", style = MaterialTheme.typography.titleSmall)
                                 }
                                 Text(
-                                    text = "当前：${selectedCategory.titleCn}",
+                                    text = "当前：${partitionDisplayName(selectedCategory)}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -542,7 +595,7 @@ fun PublishScreen(
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Text(
-                                            text = cat.titleCn,
+                                            text = partitionDisplayName(cat),
                                             style = MaterialTheme.typography.bodySmall,
                                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                                             color = if (selected) PaperWhite else MaterialTheme.colorScheme.onSurfaceVariant

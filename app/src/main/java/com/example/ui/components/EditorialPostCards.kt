@@ -68,6 +68,7 @@ fun EditorialPostCard(
     onBookmarkClick: () -> Unit,
     onShareClick: () -> Unit,
     onVoteOption: (String) -> Unit,
+    onDeleteClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember(post.id) { mutableStateOf(false) }
@@ -218,7 +219,8 @@ fun EditorialPostCard(
                 onLikeClick = onLikeClick,
                 onCommentClick = onPostClick,
                 onBookmarkClick = onBookmarkClick,
-                onShareClick = onShareClick
+                onShareClick = onShareClick,
+                onDeleteClick = onDeleteClick
             )
         }
     }
@@ -649,7 +651,8 @@ private fun PostFooterActions(
     onLikeClick: () -> Unit,
     onCommentClick: () -> Unit,
     onBookmarkClick: () -> Unit,
-    onShareClick: () -> Unit
+    onShareClick: () -> Unit,
+    onDeleteClick: (() -> Unit)? = null
 ) {
     val defaultTint = if (darkMode) MidGray else MaterialTheme.colorScheme.onSurfaceVariant
     val activeBookTint = if (darkMode) AcidYellow else InkBlack
@@ -707,18 +710,48 @@ private fun PostFooterActions(
             )
         }
 
-        IconButton(
-            onClick = onShareClick,
-            modifier = Modifier
-                .size(36.dp)
-                .testTag("share_btn_${post.id}")
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            Icon(
-                imageVector = Icons.Outlined.Share,
-                contentDescription = "分享",
-                tint = defaultTint,
-                modifier = Modifier.size(15.dp)
-            )
+            if (onDeleteClick != null) {
+                Row(
+                    modifier = Modifier
+                        .heightIn(min = 36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onDeleteClick)
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .testTag("delete_post_btn_${post.id}"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.DeleteOutline,
+                        contentDescription = "删除帖子",
+                        tint = VermilionRed,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Text(
+                        text = "删除",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = VermilionRed
+                    )
+                }
+            }
+            IconButton(
+                onClick = onShareClick,
+                modifier = Modifier
+                    .size(36.dp)
+                    .testTag("share_btn_${post.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Share,
+                    contentDescription = "分享",
+                    tint = defaultTint,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
         }
     }
 }

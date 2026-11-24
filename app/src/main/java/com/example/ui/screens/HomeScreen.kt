@@ -3,12 +3,12 @@ package com.example.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -28,14 +29,16 @@ import com.example.data.*
 import com.example.ui.components.*
 import com.example.ui.theme.*
 import com.example.viewmodel.YangmeiUiState
+import kotlinx.coroutines.launch
 
 private enum class HomeFeedTab(val label: String, val icon: ImageVector) {
     RECOMMENDED("推荐", Icons.Outlined.AutoAwesome),
     LATEST("最新", Icons.Outlined.Schedule),
-    TOPICS("话题", Icons.Outlined.Tag),
+    RELATIONSHIP("恋爱情感", Icons.Outlined.FavoriteBorder),
     MARKETPLACE("闲置交换", Icons.Outlined.Storefront),
-    MUTUAL_AID("校园互助", Icons.Outlined.VolunteerActivism),
-    RELATIONSHIP("恋爱情感", Icons.Outlined.FavoriteBorder)
+    OPPORTUNITY("校园机会", Icons.Outlined.WorkOutline),
+    LOST_FOUND("寻物", Icons.Outlined.FindInPage),
+    MUTUAL_AID("校园互助", Icons.Outlined.VolunteerActivism)
 }
 
 /**
@@ -60,16 +63,18 @@ fun HomeScreen(
 ) {
     var selectedTab by remember { mutableStateOf(HomeFeedTab.RECOMMENDED) }
     val listState = rememberLazyListState()
-    val tabScrollState = rememberScrollState()
+    val tabListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     val feedPosts = remember(uiState.visiblePosts, selectedTab) {
         when (selectedTab) {
             HomeFeedTab.RECOMMENDED -> uiState.visiblePosts.sortedByDescending { it.likeCount + it.comments.size * 3 }
             HomeFeedTab.LATEST -> uiState.visiblePosts
-            HomeFeedTab.TOPICS -> uiState.visiblePosts.filter { it.topicTags.isNotEmpty() }
-            HomeFeedTab.MARKETPLACE -> uiState.visiblePosts.filter { it.category == PostCategory.MARKETPLACE }
-            HomeFeedTab.MUTUAL_AID -> uiState.visiblePosts.filter { it.category == PostCategory.MUTUAL_AID }
             HomeFeedTab.RELATIONSHIP -> uiState.visiblePosts.filter { it.category == PostCategory.RELATIONSHIP }
+            HomeFeedTab.MARKETPLACE -> uiState.visiblePosts.filter { it.category == PostCategory.MARKETPLACE }
+            HomeFeedTab.OPPORTUNITY -> uiState.visiblePosts.filter { it.category == PostCategory.OPPORTUNITY }
+            HomeFeedTab.LOST_FOUND -> uiState.visiblePosts.filter { it.category == PostCategory.LOST_FOUND }
+            HomeFeedTab.MUTUAL_AID -> uiState.visiblePosts.filter { it.category == PostCategory.MUTUAL_AID }
         }
     }
 
@@ -153,34 +158,54 @@ fun HomeScreen(
                     }
                 }
 
-                // Horizontally scrollable multi-item title/category pill bar
-                Row(
+                // Smooth, zero-jump horizontal pill bar (fixed border & typography metrics)
+                val isDarkTheme = MaterialTheme.colorScheme.background.red < 0.2f
+                LazyRow(
+                    state = tabListState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(tabScrollState)
-                        .padding(horizontal = 14.dp, vertical = 4.dp)
+                        .padding(vertical = 4.dp)
                         .testTag("home_tabs_row"),
+                    contentPadding = PaddingValues(horizontal = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val isDarkTheme = MaterialTheme.colorScheme.background.red < 0.2f
-                    HomeFeedTab.entries.forEach { tab ->
+                    itemsIndexed(
+                        items = HomeFeedTab.entries,
+                        key = { _, tab -> tab.name }
+                    ) { index, tab ->
                         val isSelected = selectedTab == tab
                         val pillShape = RoundedCornerShape(10.dp)
                         Row(
                             modifier = Modifier
+                                .height(34.dp)
                                 .clip(pillShape)
                                 .then(
                                     if (isSelected) {
-                                        Modifier.background(YangmeiPrimaryGradient)
+                                        Modifier
+                                            .background(YangmeiPrimaryGradient)
+                                            .border(1.2.dp, Color.Transparent, pillShape)
                                     } else {
                                         Modifier
                                             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.88f))
                                             .border(1.2.dp, AuroraBorderGradient, pillShape)
                                     }
                                 )
-                                .clickable { selectedTab = tab }
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                .clickable {
+                                    selectedTab = tab
+                                    scope.launch {
+                                        val layoutInfo = tabListState.layoutInfo
+                                        val itemInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+                                        val isClipped = itemInfo == null ||
+                                            itemInfo.offset < layoutInfo.viewportStartOffset + 12 ||
+                                            (itemInfo.offset + itemInfo.size) > layoutInfo.viewportEndOffset - 12
+                                        if (isClipped) {
+                                            val targetIdx = (index - 1).coerceAtLeast(0)
+                                            tabListState.animateScrollToItem(targetIdx)
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 12.dp)
                                 .testTag("home_tab_${tab.name.lowercase()}"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -194,7 +219,7 @@ fun HomeScreen(
                             Text(
                                 text = tab.label,
                                 style = MaterialTheme.typography.titleSmall,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                fontWeight = FontWeight.SemiBold,
                                 color = if (isSelected) PaperWhite else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1
                             )

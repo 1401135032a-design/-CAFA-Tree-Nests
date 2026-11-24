@@ -17,6 +17,7 @@ interface CommunityDatabaseGateway {
     val notifications: StateFlow<List<NotificationItem>>
 
     fun insertPost(post: Post)
+    fun deletePost(postId: String)
     fun saveDraft(draft: Post)
     fun deleteDraft(draftId: String)
     fun toggleLike(postId: String)
@@ -47,11 +48,20 @@ interface CampusAuthVerificationGateway {
 
 data class ModerationResult(
     val passed: Boolean,
-    val reason: String? = null
+    val reason: String? = null,
+    val category: String? = null
 )
 
 interface ContentModerationGateway {
-    fun inspectText(content: String, blockedKeywords: List<String>): ModerationResult
+    fun inspectText(content: String, blockedKeywords: List<String> = emptyList()): ModerationResult
+
+    suspend fun inspectSubmission(
+        textParts: List<String>,
+        mediaUris: List<String> = emptyList(),
+        blockedKeywords: List<String> = emptyList()
+    ): ModerationResult
+
+    suspend fun inspectImages(mediaUris: List<String>): ModerationResult
 }
 
 interface CloudMediaStorageGateway {

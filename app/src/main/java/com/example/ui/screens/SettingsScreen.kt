@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -23,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import coil.Coil
 import com.example.BuildConfig
 import com.example.R
+import com.example.data.FirestoreMappers
 import com.example.data.UserSettings
 import com.example.ui.components.EditorialHairline
 import com.example.ui.components.MonoTagChip
@@ -229,25 +233,55 @@ fun SettingsScreen(
                             .padding(20.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        Text(
+                            text = "收件邮箱：${FirestoreMappers.FEEDBACK_TARGET_EMAIL}（提交后将同步云端并唤起邮件直达开发者）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         OutlinedTextField(
                             value = feedbackText,
                             onValueChange = { feedbackText = it },
                             label = { Text("给杨梅树窝提建议") },
-                            minLines = 2,
+                            placeholder = { Text("写下你的功能想法或问题反馈...") },
+                            minLines = 3,
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("settings_feedback_input")
                         )
                         Button(
                             onClick = {
-                                if (feedbackText.isNotBlank()) {
-                                    onSendFeedback(feedbackText)
+                                val trimmed = feedbackText.trim()
+                                if (trimmed.isNotEmpty()) {
+                                    onSendFeedback(trimmed)
+                                    val subject = "【杨梅树窝建议反馈】"
+                                    val mailBody = buildString {
+                                        append(trimmed)
+                                        append("\n\n---\n")
+                                        append("来自匿名用户：${uiState.currentPersona.nickname}\n")
+                                        append("版本：v${BuildConfig.VERSION_NAME} (Android)")
+                                    }
+                                    val mailUri = Uri.parse(
+                                        "mailto:${FirestoreMappers.FEEDBACK_TARGET_EMAIL}" +
+                                            "?subject=${Uri.encode(subject)}" +
+                                            "&body=${Uri.encode(mailBody)}"
+                                    )
+                                    val intent = Intent(Intent.ACTION_SENDTO, mailUri)
+                                    try {
+                                        context.startActivity(Intent.createChooser(intent, "选择邮箱发送建议"))
+                                    } catch (_: ActivityNotFoundException) {
+                                        // Graceful fallback: already saved to cloud feedbacks collection
+                                    }
                                     feedbackText = ""
                                 }
                             },
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .testTag("settings_send_feedback_btn")
                         ) {
-                            Text("提交匿名反馈")
+                            Text("发送建议到 1401135032@qq.com")
                         }
                         OutlinedButton(
                             onClick = onResetVerificationDemo,

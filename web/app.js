@@ -6,6 +6,11 @@
 
   const D = window.YANGMEI_DATA;
   const STORAGE_KEY = 'yangmei_tree_web_state_v3';
+  const LEGACY_STORAGE_KEYS = ['yangmei_tree_web_state_v2', 'yangmei_tree_web_state_v1', 'yangmei_tree_web_state'];
+  const SESSION_BACKUP_KEY = 'yangmei_tree_web_session_backup';
+  const IDB_NAME = 'yangmei_tree_persistent_db';
+  const IDB_STORE = 'state_kv';
+  const IDB_KEY = 'app_state_v3';
 
   // ---------------- Security: Strict HTML Escaping ----------------
   function esc(str) {
@@ -76,7 +81,10 @@
     photo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-4.5-4.5L7 20"/></svg>',
     checkCircle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.3 2.3 4.8-5.2"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>'
+    alert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>',
+    trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>',
+    shieldCheck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>',
+    shieldAlert: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/></svg>'
   };
 
   function catIcon(key) {
@@ -417,6 +425,7 @@
 
   function defaultState() {
     return {
+      _savedAt: 0,
       persona: {
         id: 'u_me',
         nickname: '美术馆北窗光',
@@ -436,6 +445,7 @@
       homeTab: 'RECOMMENDED',
       msgFilter: 'ALL',
       posts: clone(D.INITIAL_POSTS),
+      deletedPostIds: [],
       courses: clone(D.INITIAL_COURSES),
       experiences: clone(D.INITIAL_EXPERIENCES),
       hotTopics: clone(D.INITIAL_HOT_TOPICS),
@@ -452,28 +462,251 @@
     };
   }
 
-  function loadState() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return defaultState();
-      const parsed = JSON.parse(raw);
-      const merged = Object.assign(defaultState(), parsed);
-      merged.persona = Object.assign(defaultState().persona, parsed.persona || {});
-      merged.verificationRecord = Object.assign(defaultState().verificationRecord, parsed.verificationRecord || {});
-      if (merged.verificationStatus !== 'VERIFIED') {
-        merged.persona.isVerified = false;
+  function normalizeLoadedState(parsed, fromLegacyKey) {
+    const def = defaultState();
+    if (!parsed || typeof parsed !== 'object') return def;
+    const merged = Object.assign(def, parsed);
+    merged.persona = Object.assign(defaultState().persona, parsed.persona || {});
+    merged.verificationRecord = Object.assign(defaultState().verificationRecord, parsed.verificationRecord || {});
+    merged.settings = Object.assign(defaultState().settings, parsed.settings || {});
+    merged.deletedPostIds = Array.isArray(parsed.deletedPostIds) ? parsed.deletedPostIds : [];
+    merged.drafts = Array.isArray(parsed.drafts) ? parsed.drafts : [];
+    merged.notifications = Array.isArray(parsed.notifications) ? parsed.notifications : [];
+
+    // Preserve all user-authored posts and merge seed posts cleanly without resurrecting deleted posts
+    const deletedSet = new Set(merged.deletedPostIds);
+    const parsedPosts = Array.isArray(parsed.posts) ? parsed.posts : [];
+    const seenIds = new Set();
+    const cleanedPosts = [];
+    parsedPosts.forEach(p => {
+      if (!p || !p.id || deletedSet.has(p.id) || seenIds.has(p.id)) return;
+      seenIds.add(p.id);
+      cleanedPosts.push(p);
+    });
+    D.INITIAL_POSTS.forEach(seed => {
+      if (!deletedSet.has(seed.id) && !seenIds.has(seed.id)) {
+        seenIds.add(seed.id);
+        cleanedPosts.push(clone(seed));
       }
-      return merged;
+    });
+    merged.posts = cleanedPosts;
+
+    // On legacy migration, preserve verification status only if explicitly VERIFIED
+    if (fromLegacyKey && !parsed.verificationStatus) {
+      merged.verificationStatus = merged.persona.isVerified ? 'VERIFIED' : 'UNVERIFIED';
+    }
+    if (merged.verificationStatus !== 'VERIFIED') {
+      merged.persona.isVerified = false;
+    } else {
+      merged.persona.isVerified = true;
+      // Privacy hygiene & quota safety: destroy verification photo once verified
+      if (merged.verificationRecord.proofDataUrl) {
+        merged.verificationRecord.proofDataUrl = '';
+      }
+    }
+    return merged;
+  }
+
+  function readJsonStorage(storageObj, key) {
+    try {
+      const raw = storageObj.getItem(key);
+      if (!raw) return null;
+      return JSON.parse(raw);
     } catch (e) {
-      return defaultState();
+      return null;
     }
   }
 
+  function loadState() {
+    // 1. Primary localStorage key
+    const primary = readJsonStorage(localStorage, STORAGE_KEY);
+    if (primary) return normalizeLoadedState(primary, false);
+
+    // 2. Auto-migrate from any previous version key so updates never wipe user posts
+    for (let i = 0; i < LEGACY_STORAGE_KEYS.length; i++) {
+      const legacy = readJsonStorage(localStorage, LEGACY_STORAGE_KEYS[i]);
+      if (legacy) {
+        const migrated = normalizeLoadedState(legacy, true);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+        } catch (e) { /* will be handled by compact fallback below */ }
+        return migrated;
+      }
+    }
+
+    // 3. Fallback to sessionStorage backup (helps in strict mobile WebViews)
+    const sessionSnap = readJsonStorage(sessionStorage, SESSION_BACKUP_KEY);
+    if (sessionSnap) return normalizeLoadedState(sessionSnap, false);
+
+    return defaultState();
+  }
+
+  // IndexedDB dual-layer persistence (survives 5MB localStorage quota & mobile browser reloads)
+  function openStateIDB() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) { reject(new Error('no idb')); return; }
+      try {
+        const req = window.indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE);
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  function writeStateToIDB(snapshot) {
+    openStateIDB().then(db => {
+      try {
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        tx.objectStore(IDB_STORE).put(snapshot, IDB_KEY);
+      } catch (e) { /* ignore */ }
+    }).catch(() => { /* ignore */ });
+  }
+
+  function readStateFromIDB() {
+    return openStateIDB().then(db => new Promise((resolve) => {
+      try {
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const req = tx.objectStore(IDB_STORE).get(IDB_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    })).catch(() => null);
+  }
+
+  function buildCompactSnapshotForQuota(srcState) {
+    // Strip only oversized inline base64 images so text posts/comments/verification NEVER fail to persist
+    const copy = clone(srcState);
+    if (copy.verificationRecord && copy.verificationRecord.proofDataUrl && copy.verificationRecord.proofDataUrl.length > 60000) {
+      copy.verificationRecord.proofDataUrl = '';
+    }
+    (copy.posts || []).forEach(p => {
+      if (Array.isArray(p.mediaList)) {
+        p.mediaList = p.mediaList.filter(m => m && typeof m.src === 'string' && (!m.src.startsWith('data:') || m.src.length <= 180000));
+      }
+    });
+    return copy;
+  }
+
   let state = loadState();
+  let idbHydrated = false;
+  let userHasMutated = false;
+
   function saveState() {
+    userHasMutated = true;
+    state._savedAt = Date.now();
+    const fullSnapshot = clone(state);
+
+    // 1. Async write full state (with all images) to IndexedDB
+    writeStateToIDB(fullSnapshot);
+
+    // 2. Synchronous write to localStorage with quota-safe compact fallback
+    let serialized = '';
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) { /* ignore quota */ }
+      serialized = JSON.stringify(fullSnapshot);
+      localStorage.setItem(STORAGE_KEY, serialized);
+    } catch (e) {
+      try {
+        const compact = buildCompactSnapshotForQuota(fullSnapshot);
+        serialized = JSON.stringify(compact);
+        localStorage.setItem(STORAGE_KEY, serialized);
+      } catch (e2) { /* ignore if storage is completely disabled */ }
+    }
+
+    // 3. Mirror to sessionStorage as an extra WebView safety net
+    if (serialized) {
+      try {
+        sessionStorage.setItem(SESSION_BACKUP_KEY, serialized);
+      } catch (e) { /* ignore */ }
+    }
+  }
+
+  function hydrateFromIDB() {
+    readStateFromIDB().then(idbRaw => {
+      idbHydrated = true;
+      if (!idbRaw || typeof idbRaw !== 'object') {
+        // Seed IndexedDB from current localStorage state if it has user data
+        if (state._savedAt > 0 || (state.posts || []).some(p => p.isMine)) {
+          writeStateToIDB(clone(state));
+        }
+        return;
+      }
+      if (userHasMutated) return;
+      const idbState = normalizeLoadedState(idbRaw, false);
+      const localMineCount = (state.posts || []).filter(p => p.isMine).length;
+      const idbMineCount = (idbState.posts || []).filter(p => p.isMine).length;
+      const idbNewer = (idbState._savedAt || 0) > (state._savedAt || 0);
+
+      if (idbNewer || (idbMineCount > localMineCount && !(state.deletedPostIds || []).length)) {
+        // Restore newer full state (including any compressed post photos trimmed from localStorage)
+        state = idbState;
+        applyTheme();
+        recalculateHotTopicsForDay(getLocalDayKey(), true);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(buildCompactSnapshotForQuota(state)));
+        } catch (e) { /* ignore */ }
+        render();
+      } else if (idbMineCount > 0) {
+        // Restore any full mediaList images from IDB for matching posts if localStorage trimmed them
+        const idbById = new Map((idbState.posts || []).map(p => [p.id, p]));
+        let restoredMedia = false;
+        (state.posts || []).forEach(p => {
+          const fromIdb = idbById.get(p.id);
+          if (fromIdb && (fromIdb.mediaList || []).length > (p.mediaList || []).length) {
+            p.mediaList = clone(fromIdb.mediaList);
+            restoredMedia = true;
+          }
+        });
+        if (restoredMedia) render();
+      }
+    });
+  }
+
+  // Client-side Canvas Image Compression (prevents 5MB phone photos from overflowing storage)
+  function compressImageFile(file, maxEdge, quality, onDone) {
+    const reader = new FileReader();
+    reader.onerror = () => onDone('');
+    reader.onload = () => {
+      const rawDataUrl = String(reader.result || '');
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth || img.width;
+          let h = img.naturalHeight || img.height;
+          if (!w || !h) { onDone(rawDataUrl); return; }
+          if (w > maxEdge || h > maxEdge) {
+            if (w >= h) {
+              h = Math.max(1, Math.round((h * maxEdge) / w));
+              w = maxEdge;
+            } else {
+              w = Math.max(1, Math.round((w * maxEdge) / h));
+              h = maxEdge;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          const compressed = canvas.toDataURL('image/jpeg', quality || 0.78);
+          onDone(compressed && compressed.length < rawDataUrl.length ? compressed : rawDataUrl);
+        } catch (e) {
+          onDone(rawDataUrl);
+        }
+      };
+      img.onerror = () => onDone(rawDataUrl);
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
   }
 
   // ---------------- Silent Daily 00:00 Hot Topics Engine ----------------
@@ -493,7 +726,7 @@
     return Math.abs(h);
   }
 
-  function recalculateHotTopicsForDay(dayKey) {
+  function recalculateHotTopicsForDay(dayKey, skipSave) {
     const keyDay = dayKey || getLocalDayKey();
     const baseByTag = new Map();
     D.INITIAL_HOT_TOPICS.forEach(t => baseByTag.set(t.tag.toLowerCase(), clone(t)));
@@ -558,7 +791,7 @@
       return Object.assign({}, item.topic, { heatStatus: status });
     });
     state.hotTopicsDate = keyDay;
-    saveState();
+    if (!skipSave) saveState();
   }
 
   let midnightTimer = null;
@@ -598,8 +831,109 @@
     pubDraft: null,
     modal: null,       // null | { type, data }
     marqueeRaf: null,
-    marqueePaused: false
+    marqueePaused: false,
+    homeTabsScrollLeft: 0,
+    scrollMap: {},
+    lastScreenKey: '',
+    cloudConnected: false,
+    account: null,
+    cloudPosts: [],
+    cloudSyncing: false,
+    cloudError: '',
+    moderating: false,
+    feedbackSending: false
   };
+
+  function getCloud() {
+    return window.YANGMEI_CLOUD || null;
+  }
+
+  function getModeration() {
+    return window.YANGMEI_MODERATION || null;
+  }
+
+  function showModerationBlock(reason) {
+    nav.modal = {
+      type: 'moderationBlock',
+      data: {
+        reason: reason || '自动审查未通过：内容或图片涉嫌违法违规及不良信息，禁止发布。'
+      }
+    };
+    renderModalOnly();
+  }
+
+  async function moderateBeforePublish(textParts, mediaUrls) {
+    const mod = getModeration();
+    if (!mod) return { passed: true };
+    const blockedKeywords = (state.settings && state.settings.blockedKeywords) || [];
+    return await mod.inspectSubmission({
+      textParts: Array.isArray(textParts) ? textParts : [textParts],
+      mediaUrls: Array.isArray(mediaUrls) ? mediaUrls : [],
+      blockedKeywords
+    });
+  }
+
+  function mergeCloudPostsIntoState(cloudPosts) {
+    nav.cloudPosts = Array.isArray(cloudPosts) ? cloudPosts : [];
+    const deletedSet = new Set(Array.isArray(state.deletedPostIds) ? state.deletedPostIds : []);
+    const existingById = new Map((state.posts || []).map(p => [p.id, p]));
+    const seedIds = new Set((D.INITIAL_POSTS || []).map(p => p.id));
+    const currentUid = (nav.account && nav.account.publicUid) || (state.persona && state.persona.id) || '';
+
+    const mergedCloud = nav.cloudPosts
+      .filter(cp => cp && cp.id && !deletedSet.has(cp.id))
+      .map(cp => {
+        const local = existingById.get(cp.id);
+        const isMine = Boolean(cp.isMine || (currentUid && cp.authorUid === currentUid) || (local && local.isMine));
+        return {
+          ...cp,
+          isMine,
+          isLiked: local ? Boolean(local.isLiked) : false,
+          isBookmarked: local ? Boolean(local.isBookmarked) : false,
+          comments: (local && Array.isArray(local.comments) && local.comments.length >= (cp.comments || []).length)
+            ? local.comments
+            : (cp.comments || [])
+        };
+      });
+    const cloudIdSet = new Set(mergedCloud.map(p => p.id));
+
+    const localOnlyPosts = (state.posts || []).filter(p =>
+      p && p.id && !deletedSet.has(p.id) && !cloudIdSet.has(p.id) && !seedIds.has(p.id) && !p._cloud
+    );
+    const seedPosts = (state.posts || []).filter(p =>
+      p && p.id && !deletedSet.has(p.id) && !cloudIdSet.has(p.id) && seedIds.has(p.id)
+    );
+
+    state.posts = [...mergedCloud, ...localOnlyPosts, ...seedPosts];
+    recalculateHotTopicsForDay(getLocalDayKey(), true);
+  }
+
+  function initCloudBridge() {
+    const cloud = getCloud();
+    if (!cloud || cloud._yangmeiBound) return;
+    cloud._yangmeiBound = true;
+    cloud.init({
+      onConnectionChanged(connected) {
+        nav.cloudConnected = Boolean(connected);
+        if (connected) nav.cloudError = '';
+      },
+      onAccountChanged(acc) {
+        nav.account = acc;
+        if (acc && acc.publicUid && state.persona) {
+          state.persona.id = acc.publicUid;
+        }
+        render();
+      },
+      onPostsSnapshot(posts) {
+        nav.cloudConnected = true;
+        mergeCloudPostsIntoState(posts);
+        render();
+      },
+      onSyncError(err) {
+        nav.cloudError = (err && err.message) || '云端同步暂不可用';
+      }
+    });
+  }
 
   function requireVerified(actionLabel, onAllowed) {
     if (state.persona && state.persona.isVerified && state.verificationStatus === 'VERIFIED') {
@@ -642,7 +976,8 @@
   }
 
   // ---------------- Reusable Card Renderers ----------------
-  function renderEditorialPostCard(post) {
+  function renderEditorialPostCard(post, options) {
+    const allowDelete = Boolean(options && options.allowDelete && post.isMine);
     const cat = D.CATEGORIES[post.category] || D.CATEGORIES.EXHIBITION;
     const expanded = nav.expandedPosts.has(post.id);
     const displayText = (post.body && post.body.trim()) ? post.body : (post.title || '');
@@ -706,7 +1041,14 @@
               ${post.isBookmarked ? ICONS.bookmarkFilled : ICONS.bookmark}<span>${post.bookmarkCount}</span>
             </button>
           </div>
-          <button class="footer-share-btn" data-action="sharePost" data-id="${esc(post.id)}" aria-label="分享">${ICONS.share}</button>
+          <div class="post-footer-right">
+            ${allowDelete ? `
+              <button class="footer-delete-btn" data-action="confirmDeletePost" data-id="${esc(post.id)}" aria-label="删除帖子">
+                ${ICONS.trash}<span>删除</span>
+              </button>
+            ` : ''}
+            <button class="footer-share-btn" data-action="sharePost" data-id="${esc(post.id)}" aria-label="分享">${ICONS.share}</button>
+          </div>
         </div>
       </article>
     `;
@@ -716,32 +1058,42 @@
   const HOME_TABS = [
     { key: 'RECOMMENDED', label: '推荐', icon: ICONS.sparkle },
     { key: 'LATEST', label: '最新', icon: ICONS.schedule },
-    { key: 'TOPICS', label: '话题', icon: ICONS.tag },
+    { key: 'RELATIONSHIP', label: '恋爱情感', icon: ICONS.heart },
     { key: 'MARKETPLACE', label: '闲置交换', icon: ICONS.store },
-    { key: 'MUTUAL_AID', label: '校园互助', icon: ICONS.handshake },
-    { key: 'RELATIONSHIP', label: '恋爱情感', icon: ICONS.heart }
+    { key: 'OPPORTUNITY', label: '校园机会', icon: ICONS.work },
+    { key: 'LOST_FOUND', label: '寻物', icon: ICONS.find },
+    { key: 'MUTUAL_AID', label: '校园互助', icon: ICONS.handshake }
   ];
 
-  function renderHomeScreen() {
+  function getFilteredHomePosts(tabKey) {
     const all = visiblePosts();
-    let list = all;
-    if (state.homeTab === 'RECOMMENDED') {
-      list = [...all].sort((a, b) => (b.likeCount + (b.comments.length * 3)) - (a.likeCount + (a.comments.length * 3)));
-    } else if (state.homeTab === 'TOPICS') {
-      list = all.filter(p => p.topicTags && p.topicTags.length > 0);
-    } else if (state.homeTab === 'MARKETPLACE') {
-      list = all.filter(p => p.category === 'MARKETPLACE');
-    } else if (state.homeTab === 'MUTUAL_AID') {
-      list = all.filter(p => p.category === 'MUTUAL_AID');
-    } else if (state.homeTab === 'RELATIONSHIP') {
-      list = all.filter(p => p.category === 'RELATIONSHIP');
+    if (tabKey === 'RECOMMENDED') {
+      return [...all].sort((a, b) => (b.likeCount + (b.comments.length * 3)) - (a.likeCount + (a.comments.length * 3)));
     }
+    if (tabKey === 'RELATIONSHIP') return all.filter(p => p.category === 'RELATIONSHIP');
+    if (tabKey === 'MARKETPLACE') return all.filter(p => p.category === 'MARKETPLACE');
+    if (tabKey === 'OPPORTUNITY') return all.filter(p => p.category === 'OPPORTUNITY');
+    if (tabKey === 'LOST_FOUND') return all.filter(p => p.category === 'LOST_FOUND');
+    if (tabKey === 'MUTUAL_AID') return all.filter(p => p.category === 'MUTUAL_AID');
+    return all;
+  }
 
-    const tabsHtml = HOME_TABS.map(t => `
-      <button class="aurora-tab-pill ${state.homeTab === t.key ? 'active' : ''}" data-action="homeTab" data-tab="${t.key}">
-        ${t.icon}<span>${t.label}</span>
-      </button>
-    `).join('');
+  function renderHomeFeedInnerHtml(tabKey) {
+    const list = getFilteredHomePosts(tabKey);
+    const cloudBar = `
+      <div class="cloud-sync-strip">
+        <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;">
+          <span class="cloud-sync-dot ${nav.cloudConnected ? '' : 'offline'}"></span>
+          <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${nav.cloudConnected
+              ? '全校实时互通已开启 · 大家发帖即时可见'
+              : '正在连接全校实时树窝...'}
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:0.35rem;flex-shrink:0;">
+          <button class="cloud-sync-btn subtle" data-action="cloudRefreshNow">${nav.cloudSyncing ? '同步中...' : '刷新'}</button>
+        </div>
+      </div>`;
 
     const feedHtml = list.length
       ? list.map(renderEditorialPostCard).join('')
@@ -749,6 +1101,23 @@
           <div class="empty-state-title">当前分区暂时还没有内容</div>
           <div class="empty-state-sub">下拉可刷新最新内容，或点击右下角 + 号发布第一条帖子</div>
         </div>`;
+
+    return `
+      <div class="ptr-indicator" id="ptr-indicator">✦ 正在同步全校最新内容...</div>
+      ${cloudBar}
+      ${feedHtml}
+    `;
+  }
+
+  function renderHomeScreen() {
+    if (!HOME_TABS.some(t => t.key === state.homeTab)) {
+      state.homeTab = 'RECOMMENDED';
+    }
+    const tabsHtml = HOME_TABS.map(t => `
+      <button class="aurora-tab-pill ${state.homeTab === t.key ? 'active' : ''}" data-action="homeTab" data-tab="${t.key}">
+        ${t.icon}<span>${t.label}</span>
+      </button>
+    `).join('');
 
     return `
       <div class="screen-container">
@@ -767,8 +1136,7 @@
           <div class="h-scroll-row" id="home-tabs-row">${tabsHtml}</div>
         </div>
         <div class="scroll-area" id="home-scroll">
-          <div class="ptr-indicator" id="ptr-indicator">✦ 正在刷新树窝最新内容...</div>
-          ${feedHtml}
+          ${renderHomeFeedInnerHtml(state.homeTab)}
         </div>
       </div>
     `;
@@ -1376,7 +1744,10 @@
               <h1 class="sub-topbar-title" style="font-size:1rem;">${esc(cat.titleCn)}</h1>
             </div>
           </div>
-          <button class="icon-btn-48" data-action="sharePost" data-id="${esc(post.id)}" aria-label="分享">${ICONS.share}</button>
+          <div style="display:flex;align-items:center;">
+            ${post.isMine ? `<button class="icon-btn-48" style="color:var(--vermilion);" data-action="confirmDeletePost" data-id="${esc(post.id)}" aria-label="删除帖子">${ICONS.trash}</button>` : ''}
+            <button class="icon-btn-48" data-action="sharePost" data-id="${esc(post.id)}" aria-label="分享">${ICONS.share}</button>
+          </div>
         </div>
         <div class="scroll-area" style="padding-bottom:1.5rem;">
           <div style="background:var(--surface);padding:1.125rem 1.25rem;">
@@ -2283,12 +2654,20 @@
     const ct = val('pub-custom-tag'); if (ct !== null) d.customTagInput = ct;
   }
 
+  function publishCatLabel(k) {
+    if (k === 'TREE_HOLE') return '情绪树洞';
+    return (D.CATEGORIES[k] && D.CATEGORIES[k].titleCn) || k;
+  }
+
   function renderPublishScreen() {
     if (!nav.pubDraft) nav.pubDraft = makeDefaultPubDraft('TREE_HOLE', false);
     const d = nav.pubDraft;
-    const catInfo = D.CATEGORIES[d.category] || D.CATEGORIES.TREE_HOLE;
+    const pubCats = ['TREE_HOLE', 'MARKETPLACE', 'OPPORTUNITY', 'LOST_FOUND', 'MUTUAL_AID'];
+    if (!d.locked && !pubCats.includes(d.category)) {
+      d.category = 'TREE_HOLE';
+    }
+    const catDisplayName = publishCatLabel(d.category);
     const spec = PARTITION_SPECS[d.category] || PARTITION_SPECS.TREE_HOLE;
-    const pubCats = ['TREE_HOLE', 'MARKETPLACE', 'OPPORTUNITY', 'LOST_FOUND', 'MUTUAL_AID', 'EXHIBITION', 'ART_CREATION', 'RELATIONSHIP'];
 
     const suggestedTags = Array.from(new Set(spec.curatedTags.concat(D.FIXED_PUBLISH_TAGS))).slice(0, 10);
     const customTags = (d.tags || []).filter(t => !suggestedTags.includes(t));
@@ -2411,18 +2790,22 @@
             ${avatarHtml(state.persona.avatarSeed, 'avatar-24')}
             <div style="min-width:0;">
               <div style="font-size:0.875rem;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                ${d.locked ? '发布到 · ' + esc(catInfo.titleCn) : esc(catInfo.titleCn)}
+                ${d.locked ? '发布到 · ' + esc(catDisplayName) : esc(catDisplayName)}
               </div>
               <div style="font-size:0.6875rem;color:var(--ink-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(state.persona.nickname)}</div>
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:0.375rem;flex-shrink:0;">
-            <button style="font-size:0.8125rem;color:var(--ink-secondary);padding:0.375rem 0.5rem;" data-action="saveDraft">存草稿</button>
-            <button class="btn-grad-sm" style="padding:0.5rem 0.875rem;font-size:0.8125rem;" data-action="submitPost">${esc(spec.ctaLabel)}</button>
+            <button style="font-size:0.8125rem;color:var(--ink-secondary);padding:0.375rem 0.5rem;" data-action="saveDraft" ${nav.moderating ? 'disabled' : ''}>存草稿</button>
+            <button class="btn-grad-sm" style="padding:0.5rem 0.875rem;font-size:0.8125rem;opacity:${nav.moderating ? '0.72' : '1'};" data-action="submitPost" ${nav.moderating ? 'disabled' : ''}>${nav.moderating ? '安全审查中...' : esc(spec.ctaLabel)}</button>
           </div>
         </div>
 
         <div class="scroll-area sub-scroll" style="padding:1rem;display:flex;flex-direction:column;gap:0.875rem;">
+          <div class="safety-guard-banner">
+            <span style="width:1.125rem;height:1.125rem;display:flex;color:var(--active-tint);flex-shrink:0;margin-top:0.06rem;">${ICONS.shieldCheck}</span>
+            <span>系统已开启图文自动安全审查：严禁发布违法违规、色情低俗、暴力血腥、诈骗赌博、人肉隐私或恶意攻击等不良文字及图片。</span>
+          </div>
           ${d.locked ? `
             <div class="pub-partition-hero">
               <span class="pub-partition-badge">${catIcon(d.category)}</span>
@@ -2435,10 +2818,10 @@
             <div class="pub-card">
               <div class="pub-card-title">
                 <span>选择发布分区</span>
-                <span style="font-size:0.75rem;font-weight:500;color:var(--ink-secondary);">当前：${esc(catInfo.titleCn)}</span>
+                <span style="font-size:0.75rem;font-weight:500;color:var(--ink-secondary);">当前：${esc(catDisplayName)}</span>
               </div>
               <div class="chip-wrap">
-                ${pubCats.map(k => `<button class="mono-chip ${d.category === k ? 'inverted' : ''}" data-action="pubPickCat" data-val="${k}">${esc((D.CATEGORIES[k] || {}).titleCn || k)}</button>`).join('')}
+                ${pubCats.map(k => `<button class="mono-chip ${d.category === k ? 'inverted' : ''}" data-action="pubPickCat" data-val="${k}">${esc(publishCatLabel(k))}</button>`).join('')}
               </div>
               <div style="font-size:0.75rem;line-height:1.45;color:var(--ink-secondary);">${esc(spec.headerHint)}</div>
             </div>
@@ -2515,23 +2898,37 @@
   }
 
   // ---------------- Sub-Screen: PROFILE COLLECTION & SETTINGS ----------------
+  function renderSwipeDeleteWrapper(itemId, deleteAction, innerHtml) {
+    return `
+      <div class="swipe-delete-wrap" data-swipe-id="${esc(itemId)}">
+        <button class="swipe-delete-action" type="button" data-action="${esc(deleteAction)}" data-id="${esc(itemId)}" aria-label="删除">
+          ${ICONS.trash}
+          <span>删除</span>
+        </button>
+        <div class="swipe-delete-content">${innerHtml}</div>
+      </div>
+    `;
+  }
+
   function renderProfileCollectionScreen(colKey) {
     const titles = {
       MY_POSTS: '我的帖子', MY_COMMENTS: '我的评论', MY_BOOKMARKS: '我的收藏',
       MY_DRAFTS: '我的草稿', MY_TRADES: '我的交易', MY_HELP: '我的求助'
     };
     let body = '';
+    let showSwipeHint = false;
     if (colKey === 'MY_DRAFTS') {
-      body = state.drafts.length ? state.drafts.map(d => `
+      showSwipeHint = state.drafts.length > 0;
+      body = state.drafts.length ? state.drafts.map(d => renderSwipeDeleteWrapper(d.id, 'deleteDraft', `
         <div class="post-card" style="padding:1rem;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span class="mono-chip">${esc((D.CATEGORIES[d.category] || {}).titleCn || '草稿')} · 草稿</span>
-            <button style="font-size:0.75rem;color:var(--vermilion);" data-action="deleteDraft" data-id="${esc(d.id)}">删除</button>
+            <button class="footer-delete-btn" data-action="deleteDraft" data-id="${esc(d.id)}">${ICONS.trash}<span>删除</span></button>
           </div>
           <div style="font-weight:700;margin-top:0.5rem;">${esc(d.title || '无标题草稿')}</div>
           <p style="margin:0.3125rem 0 0;font-size:0.8125rem;color:var(--ink-secondary);">${esc(d.body)}</p>
         </div>
-      `).join('') : `<div class="empty-state"><div class="empty-state-title">暂无草稿</div><div class="empty-state-sub">发布页面支持随时暂存未写完的想法。</div></div>`;
+      `)).join('') : `<div class="empty-state"><div class="empty-state-title">暂无草稿</div><div class="empty-state-sub">发布页面支持随时暂存未写完的想法。</div></div>`;
     } else if (colKey === 'MY_COMMENTS') {
       const mine = [];
       state.posts.forEach(post => {
@@ -2548,11 +2945,18 @@
       `).join('') : `<div class="empty-state"><div class="empty-state-title">暂无评论记录</div></div>`;
     } else {
       let items = [];
+      const allowDelete = colKey === 'MY_POSTS' || colKey === 'MY_TRADES' || colKey === 'MY_HELP';
       if (colKey === 'MY_POSTS') items = state.posts.filter(p => p.isMine);
       else if (colKey === 'MY_BOOKMARKS') items = state.posts.filter(p => p.isBookmarked);
       else if (colKey === 'MY_TRADES') items = state.posts.filter(p => p.isMine && p.category === 'MARKETPLACE');
       else if (colKey === 'MY_HELP') items = state.posts.filter(p => p.isMine && (p.category === 'LOST_FOUND' || p.category === 'MUTUAL_AID'));
-      body = items.length ? items.map(renderEditorialPostCard).join('') : `<div class="empty-state"><div class="empty-state-title">这里暂时空着</div><div class="empty-state-sub">当你发布或收藏内容后，记录会汇集在这里。</div></div>`;
+      showSwipeHint = allowDelete && items.length > 0;
+      body = items.length
+        ? items.map(p => {
+            const cardHtml = renderEditorialPostCard(p, { allowDelete });
+            return allowDelete ? renderSwipeDeleteWrapper(p.id, 'confirmDeletePost', cardHtml) : cardHtml;
+          }).join('')
+        : `<div class="empty-state"><div class="empty-state-title">这里暂时空着</div><div class="empty-state-sub">当你发布或收藏内容后，记录会汇集在这里。</div></div>`;
     }
 
     return `
@@ -2563,7 +2967,10 @@
             <h1 class="sub-topbar-title">${titles[colKey] || '记录'}</h1>
           </div>
         </div>
-        <div class="scroll-area sub-scroll" style="padding-top:0.5rem;">${body}</div>
+        <div class="scroll-area sub-scroll" style="padding-top:0.375rem;">
+          ${showSwipeHint ? `<div class="swipe-hint-bar"><span>向左滑动帖子卡片可快速删除</span><span>← 左滑</span></div>` : ''}
+          ${body}
+        </div>
       </div>
     `;
   }
@@ -2611,8 +3018,11 @@
 
           <div class="settings-sec-header">帮助与反馈</div>
           <div class="settings-card" style="padding-top:0.875rem;padding-bottom:0.875rem;display:flex;flex-direction:column;gap:0.625rem;">
+            <div style="font-size:0.75rem;color:var(--ink-secondary);line-height:1.45;">
+              收件邮箱：1401135032@qq.com（提交后将直接投递至开发者邮箱并留存云端记录）
+            </div>
             <textarea class="field-textarea" id="feedback-input" placeholder="给杨梅树窝提建议..."></textarea>
-            <button class="btn-primary-full" data-action="submitFeedback">提交匿名反馈</button>
+            <button class="btn-primary-full" data-action="submitFeedback">${nav.feedbackSending ? '正在发送至邮箱...' : '发送建议到 1401135032@qq.com'}</button>
             <button class="btn-outline-full" data-action="resetVerifyDemo">重置为未认证状态（演示测试）</button>
           </div>
 
@@ -2862,6 +3272,38 @@
       `;
     }
 
+    if (type === 'deletePostConfirm') {
+      return `
+        <div class="gate-backdrop" data-action="closeModalBackdrop">
+          <div class="gate-dialog" role="dialog" aria-modal="true" aria-label="确认删除帖子">
+            <h3 class="gate-title">确认删除这条帖子？</h3>
+            <p class="gate-desc">删除后将无法恢复，该帖下的评论与互动记录也会一并移除。</p>
+            <div class="gate-actions">
+              <button class="btn-outline-full" style="flex:1;min-height:2.75rem;" data-action="closeModal">取消</button>
+              <button class="btn-danger-full" data-action="executeDeletePost" data-id="${esc(data.postId)}">确认删除</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    if (type === 'moderationBlock') {
+      return `
+        <div class="sheet-backdrop" data-action="closeModalBackdrop">
+          <div class="sheet-panel">
+            <div class="sheet-handle"></div>
+            <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:0.625rem;padding:0.25rem 0;">
+              <div class="mod-block-badge">${ICONS.shieldAlert}</div>
+              <h2 style="margin:0;font-size:1.125rem;font-weight:700;color:var(--vermilion);">自动安全审查未通过</h2>
+              <p style="margin:0;font-size:0.875rem;line-height:1.6;color:var(--ink);">${esc(data.reason || '检测到内容或图片涉嫌违法违规及不良信息，无法发布。')}</p>
+              <p style="margin:0;font-size:0.75rem;line-height:1.5;color:var(--ink-secondary);">请遵守国家法律法规及中央美术学院校园社区规范，修改或更换合规文字与图片后重试。</p>
+            </div>
+            <button class="btn-primary-full" data-action="closeModal">我知道了，返回修改</button>
+          </div>
+        </div>
+      `;
+    }
+
     return '';
   }
 
@@ -2973,22 +3415,169 @@
     }, { passive: true });
     scroller.addEventListener('touchend', () => {
       if (pulling && ind.classList.contains('show')) {
-        setTimeout(() => {
-          ind.classList.remove('show');
-          showToast('已刷新树窝最新内容');
-        }, 550);
+        const cloud = getCloud();
+        if (cloud && cloud.isReady()) {
+          cloud.forceRefresh()
+            .then(() => {
+              ind.classList.remove('show');
+              showToast('已同步全校最新内容');
+            })
+            .catch(() => {
+              ind.classList.remove('show');
+              showToast('已刷新本地内容');
+            });
+        } else {
+          setTimeout(() => {
+            ind.classList.remove('show');
+            showToast('已刷新树窝最新内容');
+          }, 160);
+        }
       }
       pulling = false;
     }, { passive: true });
   }
 
-  // ---------------- Master Render ----------------
-  function render() {
+  // ---------------- Swipe-Left-to-Reveal-Delete Gesture ----------------
+  let activeSwipedWrap = null;
+  let lastSwipeDragTs = 0;
+
+  function closeOpenSwipes(exceptEl) {
+    document.querySelectorAll('.swipe-delete-wrap.open').forEach(el => {
+      if (el !== exceptEl) {
+        el.classList.remove('open');
+        const c = el.querySelector('.swipe-delete-content');
+        if (c) c.style.transform = '';
+      }
+    });
+    if (!exceptEl) activeSwipedWrap = null;
+  }
+
+  function attachSwipeDeleteHandlers() {
+    const wraps = document.querySelectorAll('.swipe-delete-wrap');
+    if (!wraps.length) return;
+    const ACTION_WIDTH = 88; // 5.5rem
+
+    wraps.forEach(wrap => {
+      const content = wrap.querySelector('.swipe-delete-content');
+      if (!content) return;
+
+      let startX = 0, startY = 0, baseOffset = 0, curOffset = 0;
+      let tracking = false, lockedHorizontal = false, lockedVertical = false;
+
+      function onStart(clientX, clientY) {
+        startX = clientX;
+        startY = clientY;
+        baseOffset = wrap.classList.contains('open') ? -ACTION_WIDTH : 0;
+        curOffset = baseOffset;
+        tracking = true;
+        lockedHorizontal = false;
+        lockedVertical = false;
+      }
+
+      function onMove(clientX, clientY, ev) {
+        if (!tracking || lockedVertical) return;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+        if (!lockedHorizontal) {
+          if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+            lockedVertical = true;
+            tracking = false;
+            return;
+          }
+          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
+            lockedHorizontal = true;
+            closeOpenSwipes(wrap);
+            wrap.classList.add('swiping');
+          } else {
+            return;
+          }
+        }
+        if (ev && ev.cancelable) ev.preventDefault();
+        curOffset = Math.max(-ACTION_WIDTH, Math.min(0, baseOffset + dx));
+        content.style.transform = `translate3d(${curOffset}px, 0, 0)`;
+      }
+
+      function onEnd() {
+        if (!tracking) return;
+        tracking = false;
+        wrap.classList.remove('swiping');
+        if (lockedHorizontal) {
+          lastSwipeDragTs = Date.now();
+          const shouldOpen = curOffset < -ACTION_WIDTH * 0.4;
+          content.style.transform = '';
+          if (shouldOpen) {
+            wrap.classList.add('open');
+            activeSwipedWrap = wrap;
+          } else {
+            wrap.classList.remove('open');
+            if (activeSwipedWrap === wrap) activeSwipedWrap = null;
+          }
+        }
+      }
+
+      content.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      content.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1) onMove(e.touches[0].clientX, e.touches[0].clientY, e);
+      }, { passive: false });
+      content.addEventListener('touchend', onEnd, { passive: true });
+      content.addEventListener('touchcancel', onEnd, { passive: true });
+
+      // Desktop / mouse drag support for easy testing in preview
+      content.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        onStart(e.clientX, e.clientY);
+        const mm = (ev) => onMove(ev.clientX, ev.clientY, ev);
+        const mu = () => {
+          onEnd();
+          window.removeEventListener('mousemove', mm);
+          window.removeEventListener('mouseup', mu);
+        };
+        window.addEventListener('mousemove', mm);
+        window.addEventListener('mouseup', mu);
+      });
+    });
+  }
+
+  function getCurrentScreenKey() {
+    if (nav.stack.length > 0) {
+      const top = nav.stack[nav.stack.length - 1];
+      const p = top.params || {};
+      return 'stack:' + top.name + ':' + (p.id || p.colKey || p.catKey || p.tag || '');
+    }
+    return 'tab:' + nav.activeTab;
+  }
+
+  function renderModalOnly() {
+    const modalRoot = document.getElementById('modal-root');
+    if (modalRoot) {
+      modalRoot.innerHTML = renderModal();
+    }
+    bindDynamicInputs();
+  }
+
+  // ---------------- Master Render (Scroll-Preserving) ----------------
+  function render(opts) {
     applyTheme();
     stopMarquee();
 
+    const prevTabsRow = document.getElementById('home-tabs-row');
+    if (prevTabsRow) {
+      nav.homeTabsScrollLeft = prevTabsRow.scrollLeft;
+    }
+
     const viewport = document.getElementById('main-viewport');
     const modalRoot = document.getElementById('modal-root');
+
+    // Save current screen's vertical scroll position BEFORE touching DOM
+    const prevScroller = viewport ? viewport.querySelector('.scroll-area') : null;
+    if (prevScroller && nav.lastScreenKey) {
+      nav.scrollMap[nav.lastScreenKey] = prevScroller.scrollTop;
+    }
+
+    const nextKey = getCurrentScreenKey();
+    const isSameScreen = nextKey === nav.lastScreenKey;
 
     let html = '';
     if (nav.stack.length > 0) {
@@ -3017,12 +3606,31 @@
     modalRoot.innerHTML = renderModal();
     renderBottomChrome();
 
+    // Restore vertical scroll position so clicking any button never jumps back to top
+    const nextScroller = viewport.querySelector('.scroll-area');
+    const resetScroll = Boolean(opts && opts.resetScroll);
+    if (nextScroller && !resetScroll) {
+      const savedTop = isSameScreen
+        ? (prevScroller ? prevScroller.scrollTop : (nav.scrollMap[nextKey] || 0))
+        : (nav.scrollMap[nextKey] || 0);
+      if (savedTop > 0) {
+        nextScroller.scrollTop = savedTop;
+      }
+    }
+    nav.lastScreenKey = nextKey;
+
+    const nextTabsRow = document.getElementById('home-tabs-row');
+    if (nextTabsRow && nav.homeTabsScrollLeft > 0) {
+      nextTabsRow.scrollLeft = nav.homeTabsScrollLeft;
+    }
+
     if (nav.stack.length === 0 && nav.activeTab === 'discover') {
       startMarquee();
     }
     if (nav.stack.length === 0 && nav.activeTab === 'home') {
       attachPullToRefresh();
     }
+    attachSwipeDeleteHandlers();
     bindDynamicInputs();
   }
 
@@ -3061,15 +3669,17 @@
         showToast('请上传图片格式的央美身份凭证');
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        nav.verifyDraft.proofDataUrl = String(reader.result || '');
+      compressImageFile(file, 720, 0.72, (compressedUrl) => {
+        if (!compressedUrl) {
+          showToast('照片读取失败，请重试');
+          return;
+        }
+        nav.verifyDraft.proofDataUrl = compressedUrl;
         nav.verifyDraft.proofLabel = `已${sourceLabel}「${nav.verifyDraft.proofType}」照片`;
         nav.modal = null;
         render();
         showToast('凭证照片已上传，请确认下方声明后提交审核');
-      };
-      reader.readAsDataURL(file);
+      });
     }
 
     const verifyCameraInput = document.getElementById('verify-camera-input');
@@ -3097,14 +3707,22 @@
         syncPubInputsToDraft();
         const remaining = Math.max(0, 4 - nav.pubDraft.mediaList.length);
         const files = Array.from(e.target.files).slice(0, remaining);
-        files.forEach(file => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            if (!nav.pubDraft) return;
-            nav.pubDraft.mediaList.push({ src: String(reader.result || '') });
+        inp.value = '';
+        const mod = getModeration();
+        files.forEach((file, idx) => {
+          compressImageFile(file, 1080, 0.78, async (compressedUrl) => {
+            if (!nav.pubDraft || !compressedUrl) return;
+            if (mod && typeof mod.inspectImageDataUrl === 'function') {
+              const check = await mod.inspectImageDataUrl(compressedUrl, `所选图片 #${idx + 1}`);
+              if (!check.passed) {
+                showModerationBlock(check.reason);
+                return;
+              }
+            }
+            if (!nav.pubDraft || nav.pubDraft.mediaList.length >= 4) return;
+            nav.pubDraft.mediaList.push({ src: compressedUrl });
             render();
-          };
-          reader.readAsDataURL(file);
+          });
         });
       });
     }
@@ -3124,20 +3742,32 @@
         e.preventDefault();
         const input = document.getElementById('comment-input');
         const text = (input && input.value || '').trim();
-        if (!text) return;
-        requireVerified('发表评论与回复', () => {
+        if (!text || nav.moderating) return;
+        requireVerified('发表评论与回复', async () => {
+          nav.moderating = true;
+          const modRes = await moderateBeforePublish([text], []);
+          nav.moderating = false;
+          if (!modRes.passed) {
+            showModerationBlock(modRes.reason);
+            return;
+          }
           const postId = commentForm.getAttribute('data-post-id');
           const post = state.posts.find(p => p.id === postId);
           if (post) {
-            post.comments.push({
+            const newComment = {
               id: 'c_' + Date.now(),
-              author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+              author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed, identityType: state.persona.identityType },
               content: text,
               createdAt: '刚刚',
               likes: 0
-            });
+            };
+            post.comments.push(newComment);
             recalculateHotTopicsForDay(getLocalDayKey());
             saveState();
+            const cloud = getCloud();
+            if (cloud && cloud.isReady() && post._cloud) {
+              cloud.addComment(postId, post.authorUid || post.author.id, newComment, post.comments.length).catch(() => {});
+            }
             render();
             showToast('评论已发布');
           }
@@ -3147,14 +3777,43 @@
   }
 
   // ---------------- Event Delegation ----------------
+  function syncCommentObserver() {
+    const cloud = getCloud();
+    if (!cloud) return;
+    const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+    if (top && top.name === 'postDetail' && top.params && top.params.id && cloud.isReady()) {
+      const targetId = top.params.id;
+      const targetPost = state.posts.find(p => p.id === targetId);
+      if (targetPost && targetPost._cloud) {
+        cloud.observeComments(targetId, (cloudComments) => {
+          const post = state.posts.find(p => p.id === targetId);
+          if (!post) return;
+          const byId = new Map();
+          (post.comments || []).forEach(c => byId.set(c.id, c));
+          cloudComments.forEach(c => byId.set(c.id, c));
+          post.comments = Array.from(byId.values());
+          saveState();
+          const cur = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+          if (cur && cur.name === 'postDetail' && cur.params && cur.params.id === targetId) {
+            render();
+          }
+        });
+        return;
+      }
+    }
+    cloud.stopObservingComments();
+  }
+
   function pushScreen(name, params) {
     nav.stack.push({ name, params: params || {} });
-    render();
+    syncCommentObserver();
+    render({ resetScroll: true });
   }
 
   function popScreen() {
     if (nav.stack.length > 0) {
       nav.stack.pop();
+      syncCommentObserver();
       render();
     }
   }
@@ -3189,10 +3848,10 @@
       const act = actionEl.getAttribute('data-action');
 
       if (act === 'closeModalBackdrop') {
-        if (e.target === actionEl) { nav.modal = null; render(); }
+        if (e.target === actionEl) { nav.modal = null; renderModalOnly(); }
         return;
       }
-      if (act === 'closeModal') { nav.modal = null; render(); return; }
+      if (act === 'closeModal') { nav.modal = null; renderModalOnly(); return; }
       if (act === 'goBack') { popScreen(); return; }
 
       if (act === 'switchTab') {
@@ -3203,8 +3862,54 @@
       }
 
       if (act === 'homeTab') {
-        state.homeTab = actionEl.getAttribute('data-tab');
+        const nextTab = actionEl.getAttribute('data-tab');
+        if (!nextTab) return;
+        state.homeTab = nextTab;
+        const tabsRow = document.getElementById('home-tabs-row');
+        const feedScroll = document.getElementById('home-scroll');
+        if (tabsRow && feedScroll) {
+          tabsRow.querySelectorAll('.aurora-tab-pill').forEach(btn => {
+            btn.classList.toggle('active', btn.getAttribute('data-tab') === nextTab);
+          });
+          const rowRect = tabsRow.getBoundingClientRect();
+          const pillRect = actionEl.getBoundingClientRect();
+          if (pillRect.left < rowRect.left + 12) {
+            tabsRow.scrollTo({
+              left: Math.max(0, tabsRow.scrollLeft - (rowRect.left + 14 - pillRect.left)),
+              behavior: 'smooth'
+            });
+          } else if (pillRect.right > rowRect.right - 12) {
+            tabsRow.scrollTo({
+              left: tabsRow.scrollLeft + (pillRect.right - rowRect.right + 14),
+              behavior: 'smooth'
+            });
+          }
+          nav.homeTabsScrollLeft = tabsRow.scrollLeft;
+          feedScroll.innerHTML = renderHomeFeedInnerHtml(nextTab);
+          feedScroll.scrollTop = 0;
+          attachPullToRefresh();
+        } else {
+          render();
+        }
+        return;
+      }
+
+      if (act === 'cloudRefreshNow') {
+        const cloud = getCloud();
+        if (!cloud || !cloud.isReady()) return;
+        nav.cloudSyncing = true;
         render();
+        cloud.forceRefresh()
+          .then(() => {
+            nav.cloudSyncing = false;
+            render();
+            showToast('已同步全校最新动态');
+          })
+          .catch(() => {
+            nav.cloudSyncing = false;
+            render();
+            showToast('刷新失败，请检查网络连接');
+          });
         return;
       }
 
@@ -3220,8 +3925,12 @@
         const p = state.posts.find(x => x.id === actionEl.getAttribute('data-id'));
         if (p) {
           p.isLiked = !p.isLiked;
-          p.likeCount += p.isLiked ? 1 : -1;
+          p.likeCount = Math.max(0, (p.likeCount || 0) + (p.isLiked ? 1 : -1));
           saveState();
+          const cloud = getCloud();
+          if (cloud && cloud.isReady() && p._cloud) {
+            cloud.updatePostCounters(p.id, { likeCount: p.likeCount }).catch(() => {});
+          }
           render();
         }
         return;
@@ -3231,8 +3940,12 @@
         const p = state.posts.find(x => x.id === actionEl.getAttribute('data-id'));
         if (p) {
           p.isBookmarked = !p.isBookmarked;
-          p.bookmarkCount += p.isBookmarked ? 1 : -1;
+          p.bookmarkCount = Math.max(0, (p.bookmarkCount || 0) + (p.isBookmarked ? 1 : -1));
           saveState();
+          const cloud = getCloud();
+          if (cloud && cloud.isReady() && p._cloud) {
+            cloud.updatePostCounters(p.id, { bookmarkCount: p.bookmarkCount }).catch(() => {});
+          }
           render();
           showToast(p.isBookmarked ? '已加入我的收藏' : '已取消收藏');
         }
@@ -3383,11 +4096,19 @@
         return;
       }
       if (act === 'submitReview') {
+        if (nav.moderating) return;
         const cid = actionEl.getAttribute('data-id');
-        requireVerified('发布选课评价', () => {
+        requireVerified('发布选课评价', async () => {
           const c = state.courses.find(x => x.id === cid);
           const content = (document.getElementById('rev-content')?.value || '').trim();
           if (!content) { showToast('请先写下你的课程体验'); return; }
+          nav.moderating = true;
+          const modRes = await moderateBeforePublish([content], []);
+          nav.moderating = false;
+          if (!modRes.passed) {
+            showModerationBlock(modRes.reason);
+            return;
+          }
           const rec = Math.max(1, Math.min(5, Number(document.getElementById('rev-rec')?.value || 5)));
           const diff = Math.max(1, Math.min(5, Number(document.getElementById('rev-diff')?.value || 4)));
           const work = Math.max(1, Math.min(5, Number(document.getElementById('rev-work')?.value || 3)));
@@ -3430,11 +4151,19 @@
       if (act === 'ccPickType') { nav.modal.data.courseType = actionEl.getAttribute('data-val'); render(); return; }
       if (act === 'ccPickCampus') { nav.modal.data.campus = actionEl.getAttribute('data-val'); render(); return; }
       if (act === 'submitNewCourse') {
-        requireVerified('共建选课档案', () => {
+        if (nav.moderating) return;
+        requireVerified('共建选课档案', async () => {
           const name = (document.getElementById('cc-name')?.value || '').trim();
           const instructor = (document.getElementById('cc-instructor')?.value || '').trim();
           const summary = (document.getElementById('cc-summary')?.value || '').trim();
           if (!name || !instructor) { showToast('请填写课程名称和授课教师'); return; }
+          nav.moderating = true;
+          const modRes = await moderateBeforePublish([name, instructor, summary], []);
+          nav.moderating = false;
+          if (!modRes.passed) {
+            showModerationBlock(modRes.reason);
+            return;
+          }
           const campus = nav.modal.data.campus || '望京本院';
           const college = (D.CAFA_CAMPUS_COLLEGES[campus] || ['设计学院'])[0];
           state.courses.unshift({
@@ -3476,9 +4205,17 @@
         return;
       }
       if (act === 'submitSeniorExp') {
-        requireVerified('在学长学姐说发帖', () => {
+        if (nav.moderating) return;
+        requireVerified('在学长学姐说发帖', async () => {
           const body = (document.getElementById('exp-compose-body')?.value || '').trim();
           if (!body) { showToast('请先写下你的经验分享'); return; }
+          nav.moderating = true;
+          const modRes = await moderateBeforePublish([body], []);
+          nav.moderating = false;
+          if (!modRes.passed) {
+            showModerationBlock(modRes.reason);
+            return;
+          }
           const firstLine = body.split('\n')[0].slice(0, 26);
           state.experiences.unshift({
             id: 'exp_' + Date.now(),
@@ -3584,6 +4321,14 @@
       if (act === 'savePersona') {
         const nick = (nav.modal.data.nickname || '').trim();
         if (nick.length < 2) { showToast('昵称至少 2 个字'); return; }
+        const mod = getModeration();
+        if (mod && typeof mod.inspectText === 'function') {
+          const nickRes = mod.inspectText(nick, (state.settings && state.settings.blockedKeywords) || []);
+          if (!nickRes.passed) {
+            showModerationBlock(nickRes.reason);
+            return;
+          }
+        }
         state.persona.nickname = nick;
         state.persona.avatarSeed = nav.modal.data.seed;
         saveState();
@@ -3663,6 +4408,9 @@
           state.verificationStatus = 'VERIFIED';
           state.persona.identityType = state.verificationRecord.identityType || '在读学生';
           state.persona.isVerified = true;
+          // Destroy proof image after verification completes (privacy + frees storage quota)
+          state.verificationRecord.proofDataUrl = '';
+          nav.verifyDraft.proofDataUrl = '';
           nav.verifyAuditStep = 0;
           saveState();
           render();
@@ -3700,6 +4448,39 @@
         state.drafts = state.drafts.filter(d => d.id !== actionEl.getAttribute('data-id'));
         saveState();
         render();
+        return;
+      }
+      if (act === 'confirmDeletePost') {
+        const pid = actionEl.getAttribute('data-id');
+        if (pid) {
+          nav.modal = { type: 'deletePostConfirm', data: { postId: pid } };
+          renderModalOnly();
+        }
+        return;
+      }
+      if (act === 'executeDeletePost') {
+        const pid = actionEl.getAttribute('data-id');
+        if (pid) {
+          const target = state.posts.find(p => p.id === pid);
+          state.posts = state.posts.filter(p => p.id !== pid);
+          if (!Array.isArray(state.deletedPostIds)) state.deletedPostIds = [];
+          if (!state.deletedPostIds.includes(pid)) state.deletedPostIds.push(pid);
+          recalculateHotTopicsForDay(getLocalDayKey());
+          saveState();
+          const cloud = getCloud();
+          if (cloud && cloud.isReady() && target && (target._cloud || target.isMine)) {
+            cloud.deletePost(pid, target.authorUid || (target.author && target.author.id)).catch(() => {});
+          }
+          // If deleting from inside Post Detail, pop back cleanly
+          const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+          if (top && top.name === 'postDetail' && top.params && top.params.id === pid) {
+            nav.stack.pop();
+            syncCommentObserver();
+          }
+        }
+        nav.modal = null;
+        render();
+        showToast('帖子已删除');
         return;
       }
 
@@ -3775,10 +4556,19 @@
         return;
       }
       if (act === 'saveDraft') {
+        if (nav.moderating) return;
         syncPubInputsToDraft();
         const d = nav.pubDraft;
         const body = (d && d.body || '').trim();
         if (!body) { showToast('内容为空，未保存草稿'); return; }
+        const mod = getModeration();
+        if (mod && typeof mod.inspectText === 'function') {
+          const check = mod.inspectText(body, (state.settings && state.settings.blockedKeywords) || []);
+          if (!check.passed) {
+            showModerationBlock(check.reason);
+            return;
+          }
+        }
         state.drafts.unshift({ id: 'draft_' + Date.now(), category: d.category, title: '', body, createdAt: '刚刚' });
         saveState();
         nav.pubDraft = null;
@@ -3787,8 +4577,9 @@
         return;
       }
       if (act === 'submitPost') {
+        if (nav.moderating) return;
         syncPubInputsToDraft();
-        requireVerified('发布校园内容', () => {
+        requireVerified('发布校园内容', async () => {
           const d = nav.pubDraft;
           const rawBody = (d && d.body || '').trim();
           if (!rawBody) { showToast('先写点内容再发布吧'); return; }
@@ -3829,12 +4620,36 @@
           const finalBody = prefix && !rawBody.startsWith('【') ? `${prefix}\n${rawBody}` : rawBody;
           const mergedTags = Array.from(new Set([...(d.tags || []), ...autoTags])).slice(0, 6);
 
-          state.posts.unshift({
+          nav.moderating = true;
+          render();
+          const modRes = await moderateBeforePublish(
+            [finalTitle, finalBody, mergedTags.join(' '), d.location || '', d.eventTime || '', finalPrice || ''],
+            (d.mediaList || []).slice(0, 4)
+          );
+          nav.moderating = false;
+          if (!modRes.passed) {
+            render();
+            showModerationBlock(modRes.reason);
+            return;
+          }
+
+          const newPost = {
             id: 'post_' + Date.now(),
+            indexCode: 'NO.0' + (413 + state.posts.length),
             title: finalTitle,
             body: finalBody,
-            author: { id: state.persona.id, nickname: state.persona.nickname, avatarSeed: state.persona.avatarSeed },
+            author: {
+              id: (nav.account && nav.account.publicUid) || state.persona.id,
+              nickname: state.persona.nickname,
+              avatarSeed: state.persona.avatarSeed,
+              identityType: state.persona.identityType,
+              isVerified: true
+            },
             category: d.category,
+            layoutType: d.category === 'MARKETPLACE' ? 'MARKETPLACE_ITEM'
+              : d.category === 'TREE_HOLE' ? 'TREE_HOLE_MOOD'
+              : (d.category === 'LOST_FOUND' || d.category === 'MUTUAL_AID' || d.category === 'OPPORTUNITY') ? 'HELP_REQUEST'
+              : ((d.mediaList || []).length > 0 ? 'IMAGE_FIRST' : 'EDITORIAL_TEXT'),
             topicTags: mergedTags,
             mediaList: (d.mediaList || []).slice(0, 4),
             createdAt: '刚刚',
@@ -3850,10 +4665,19 @@
             location: d.location || undefined,
             eventTime: d.eventTime || undefined,
             comments: []
-          });
+          };
+          state.posts.unshift(newPost);
           recalculateHotTopicsForDay(getLocalDayKey());
           saveState();
-          const catTitle = (D.CATEGORIES[d.category] || {}).titleCn || '树窝';
+          const cloud = getCloud();
+          if (cloud && cloud.isReady()) {
+            const acc = cloud.getAccount();
+            newPost._cloud = true;
+            newPost.authorUid = acc.publicUid;
+            newPost.author.id = acc.publicUid;
+            cloud.publishPost(newPost).catch(() => {});
+          }
+          const catTitle = publishCatLabel(d.category);
           nav.pubDraft = null;
           popScreen();
           if (nav.stack.length === 0) {
@@ -3861,7 +4685,7 @@
             state.homeTab = 'LATEST';
           }
           render();
-          showToast('已匿名发布至「' + catTitle + '」');
+          showToast('已通过安全审查并匿名发布至「' + catTitle + '」');
         });
         return;
       }
@@ -3892,10 +4716,28 @@
         return;
       }
       if (act === 'submitFeedback') {
-        const fb = (document.getElementById('feedback-input')?.value || '').trim();
+        const inputEl = document.getElementById('feedback-input');
+        const fb = (inputEl && inputEl.value || '').trim();
         if (!fb) { showToast('请输入建议内容'); return; }
-        document.getElementById('feedback-input').value = '';
-        showToast('感谢反馈，已记录你的建议');
+        if (nav.feedbackSending) return;
+        nav.feedbackSending = true;
+        render();
+        const cloud = getCloud();
+        const sendPromise = cloud
+          ? cloud.submitFeedback(fb, state.persona.nickname, D.COPYRIGHT.version)
+          : Promise.resolve({ emailSent: false, cloudSaved: false });
+        sendPromise.then((res) => {
+          nav.feedbackSending = false;
+          render();
+          if (res && res.emailSent) {
+            showToast('建议已发送至 1401135032@qq.com');
+          } else {
+            const subject = encodeURIComponent('【杨梅树窝建议反馈】');
+            const body = encodeURIComponent(fb + '\n\n---\n来自匿名同学：' + state.persona.nickname);
+            window.location.href = `mailto:1401135032@qq.com?subject=${subject}&body=${body}`;
+            showToast('已打开邮箱客户端，收件人：1401135032@qq.com');
+          }
+        });
         return;
       }
       if (act === 'resetVerifyDemo') {
@@ -3930,6 +4772,14 @@
       return;
     }
 
+    // If a swipe-delete row is currently open or just finished dragging, close it instead of opening post
+    if (Date.now() - lastSwipeDragTs < 260) return;
+    const openSwipe = document.querySelector('.swipe-delete-wrap.open');
+    if (openSwipe) {
+      closeOpenSwipes(null);
+      return;
+    }
+
     // Card tap -> open post detail
     const postCard = e.target.closest('[data-open-post]');
     if (postCard) {
@@ -3941,8 +4791,8 @@
   function boot() {
     applyTheme();
     buildHollowLogos();
-    // Silently compute today's hot topics ranking & arm 00:00 daily rollover
-    recalculateHotTopicsForDay(getLocalDayKey());
+    // Silently compute today's hot topics ranking without prematurely overwriting IDB before hydration
+    recalculateHotTopicsForDay(getLocalDayKey(), true);
     scheduleSilentMidnightHotTopics();
 
     // Render splash hollow logo
@@ -3976,6 +4826,26 @@
         }
         openPublishScreen('TREE_HOLE', false);
       });
+    }
+
+    // Flush state before mobile browser / WebView exits or backgrounds
+    const flushStateOnExit = () => {
+      if (idbHydrated || userHasMutated) saveState();
+    };
+    window.addEventListener('pagehide', flushStateOnExit);
+    window.addEventListener('beforeunload', flushStateOnExit);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushStateOnExit();
+    });
+
+    // Hydrate from IndexedDB mirror if available (recovers posts/photos across WebView resets)
+    hydrateFromIDB();
+
+    // Connect real-time shared Cloud Firestore bridge
+    if (window.YANGMEI_CLOUD) {
+      initCloudBridge();
+    } else {
+      window.addEventListener('yangmei-cloud-ready', initCloudBridge, { once: true });
     }
 
     render();

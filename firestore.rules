@@ -1,0 +1,207 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidSha256Hex(val) {
+      return val is string && val.size() == 64 && val.matches('^[a-fA-F0-9]{64}$');
+    }
+
+    function isOptString(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    function isValidPost(data) {
+      return data.keys().hasAll([
+          'authorUid', 'visibility', 'indexCode', 'title', 'body',
+          'category', 'layoutType', 'authorNickname', 'authorAvatarSeed',
+          'authorIdentityType', 'authorVerified', 'topicTags', 'mediaUrls',
+          'viewCount', 'likeCount', 'bookmarkCount', 'commentCount',
+          'allowComments', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'authorUid', 'visibility', 'deleteVerifier', 'deleteProof',
+          'indexCode', 'title', 'body', 'category', 'layoutType',
+          'authorNickname', 'authorAvatarSeed', 'authorIdentityType',
+          'authorVerified', 'topicTags', 'mediaUrls', 'viewCount',
+          'likeCount', 'bookmarkCount', 'commentCount', 'allowComments',
+          'price', 'tradeStatus', 'location', 'eventTime', 'contactHint',
+          'moodTag', 'pollQuestion', 'pollOptions', 'createdAt', 'updatedAt'
+        ])
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.visibility in ['public', 'deleted']
+        && (!('deleteVerifier' in data) || isValidSha256Hex(data.deleteVerifier))
+        && isOptString(data, 'deleteProof', 128)
+        && data.indexCode is string && data.indexCode.size() >= 1 && data.indexCode.size() <= 24
+        && data.title is string && data.title.size() <= 80
+        && data.body is string && data.body.size() >= 1 && data.body.size() <= 5000
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 40
+        && data.layoutType is string && data.layoutType.size() >= 1 && data.layoutType.size() <= 40
+        && data.authorNickname is string && data.authorNickname.size() >= 1 && data.authorNickname.size() <= 40
+        && data.authorAvatarSeed is int && data.authorAvatarSeed >= 0 && data.authorAvatarSeed <= 1000000
+        && data.authorIdentityType is string && data.authorIdentityType.size() >= 1 && data.authorIdentityType.size() <= 32
+        && data.authorVerified is bool
+        && data.topicTags is list && data.topicTags.size() <= 10
+        && data.mediaUrls is list && data.mediaUrls.size() <= 4
+        && data.viewCount is int && data.viewCount >= 0 && data.viewCount <= 10000000
+        && data.likeCount is int && data.likeCount >= 0 && data.likeCount <= 1000000
+        && data.bookmarkCount is int && data.bookmarkCount >= 0 && data.bookmarkCount <= 1000000
+        && data.commentCount is int && data.commentCount >= 0 && data.commentCount <= 100000
+        && data.allowComments is bool
+        && isOptString(data, 'price', 40)
+        && isOptString(data, 'tradeStatus', 60)
+        && isOptString(data, 'location', 80)
+        && isOptString(data, 'eventTime', 60)
+        && isOptString(data, 'contactHint', 100)
+        && isOptString(data, 'moodTag', 40)
+        && isOptString(data, 'pollQuestion', 120)
+        && (!('pollOptions' in data) || (data.pollOptions is list && data.pollOptions.size() <= 6))
+        && data.createdAt is timestamp && data.createdAt <= request.time
+        && data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidComment(data, postId) {
+      return data.keys().hasAll([
+          'postId', 'postAuthorUid', 'authorUid', 'visibility',
+          'authorNickname', 'authorAvatarSeed', 'authorIdentityType',
+          'authorVerified', 'content', 'likes', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'postId', 'postAuthorUid', 'authorUid', 'visibility',
+          'authorNickname', 'authorAvatarSeed', 'authorIdentityType',
+          'authorVerified', 'content', 'likes', 'replyToNickname',
+          'comfortTag', 'cohortLabel', 'createdAt'
+        ])
+        && data.postId == postId
+        && data.postAuthorUid is string && data.postAuthorUid.size() >= 1 && data.postAuthorUid.size() <= 128
+        && data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128
+        && data.visibility == 'public'
+        && data.authorNickname is string && data.authorNickname.size() >= 1 && data.authorNickname.size() <= 40
+        && data.authorAvatarSeed is int && data.authorAvatarSeed >= 0 && data.authorAvatarSeed <= 1000000
+        && data.authorIdentityType is string && data.authorIdentityType.size() >= 1 && data.authorIdentityType.size() <= 32
+        && data.authorVerified is bool
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 1500
+        && data.likes is int && data.likes >= 0 && data.likes <= 100000
+        && isOptString(data, 'replyToNickname', 40)
+        && isOptString(data, 'comfortTag', 40)
+        && isOptString(data, 'cohortLabel', 40)
+        && data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasAll([
+          'userId', 'authorNickname', 'content', 'targetEmail',
+          'platform', 'appVersion', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'authorNickname', 'content', 'targetEmail',
+          'platform', 'appVersion', 'createdAt'
+        ])
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128
+        && data.authorNickname is string && data.authorNickname.size() >= 1 && data.authorNickname.size() <= 40
+        && data.content is string && data.content.size() >= 1 && data.content.size() <= 2000
+        && data.targetEmail == '1401135032@qq.com'
+        && data.platform in ['android', 'web']
+        && data.appVersion is string && data.appVersion.size() >= 1 && data.appVersion.size() <= 30
+        && data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /posts/{postId} {
+      // Only active public posts can be read or listed; deleted tombstones are unreadable by anyone
+      allow get, list: if resource.data.visibility == 'public';
+
+      allow create: if isValidId(postId)
+        && incoming().visibility == 'public'
+        && !('deleteProof' in incoming())
+        && incoming().likeCount == 0
+        && incoming().bookmarkCount == 0
+        && incoming().commentCount == 0
+        && isValidPost(incoming());
+
+      allow update: if isValidId(postId)
+        && isValidPost(incoming())
+        && existing().visibility == 'public'
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && (!('deleteVerifier' in existing()) || incoming().deleteVerifier == existing().deleteVerifier)
+        && (
+          // Action 1: Community interaction counters & poll votes on active public posts
+          (
+            incoming().visibility == 'public'
+            && !('deleteProof' in incoming())
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'likeCount', 'bookmarkCount', 'viewCount', 'commentCount', 'pollOptions', 'updatedAt'
+            ])
+            && incoming().likeCount >= existing().likeCount - 1
+            && incoming().likeCount <= existing().likeCount + 1
+            && incoming().bookmarkCount >= existing().bookmarkCount - 1
+            && incoming().bookmarkCount <= existing().bookmarkCount + 1
+            && incoming().viewCount >= existing().viewCount
+            && incoming().viewCount <= existing().viewCount + 5
+            && incoming().commentCount >= existing().commentCount - 1
+            && incoming().commentCount <= existing().commentCount + 1
+          )
+          // Action 2: Author-verified tombstone deletion (cryptographic SHA-256 proof)
+          || (
+            incoming().visibility == 'deleted'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['visibility', 'deleteProof', 'updatedAt'])
+            && incoming().deleteProof is string
+            && incoming().deleteProof.size() >= 8
+            && (
+              ('deleteVerifier' in existing()
+                && hashing.sha256(incoming().deleteProof).toHexString().lower() == existing().deleteVerifier.lower())
+              || (!('deleteVerifier' in existing())
+                && incoming().deleteProof == existing().authorUid)
+            )
+          )
+        );
+
+      // Physical delete disabled in favor of cryptographically verified tombstoning
+      allow delete: if false;
+
+      match /comments/{commentId} {
+        allow get, list: if isValidId(postId)
+          && resource.data.visibility == 'public';
+
+        allow create: if isValidId(postId)
+          && isValidId(commentId)
+          && exists(/databases/$(database)/documents/posts/$(postId))
+          && incoming().likes == 0
+          && isValidComment(incoming(), postId);
+
+        allow update: if isValidId(postId)
+          && isValidId(commentId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['likes'])
+          && incoming().likes is int
+          && incoming().likes >= 0
+          && incoming().likes >= existing().likes - 1
+          && incoming().likes <= existing().likes + 1;
+
+        allow delete: if false;
+      }
+    }
+
+    match /feedbacks/{feedbackId} {
+      allow get, list: if false;
+      allow create: if isValidId(feedbackId) && isValidFeedback(incoming());
+      allow update, delete: if false;
+    }
+  }
+}
