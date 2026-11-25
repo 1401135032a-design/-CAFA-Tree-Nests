@@ -30,7 +30,9 @@
   let activeCommentsPostId = null;
   let lastPostsFingerprint = '';
   let lastCommentsFingerprint = '';
+  let lastNotifsFingerprint = '';
   let inFlightPosts = false;
+  let inFlightNotifs = false;
 
   // ---------------- Pure JS SHA-256 (Works on HTTP & HTTPS, matches Android MessageDigest) ----------------
   function sha256Hex(ascii) {
@@ -449,12 +451,90 @@
     }
   }
 
+  function mapRecordToNotification(rec) {
+    const d = (rec && rec.data) || {};
+    return {
+      id: rec.id,
+      _cloud: true,
+      _createdMs: parseTimestampMs(d.createdAt),
+      recipientUid: d.recipientUid || '',
+      senderUid: d.senderUid || '',
+      senderName: d.senderNickname || '央美同学',
+      senderSeed: Number(d.senderAvatarSeed || 512),
+      type: d.type || 'LIKE',
+      group: d.group || 'REACTIONS',
+      postId: d.postId || '',
+      summary: d.summary || '与你产生了新的互动',
+      createdAt: formatRelativeTime(d.createdAt)
+    };
+  }
+
+  async function fetchMyNotifications(forceEmit) {
+    if (!deviceSession) deviceSession = loadOrCreateSession();
+    if (!deviceSession || !deviceSession.publicUid) return [];
+    if (inFlightNotifs && !forceEmit) return null;
+    inFlightNotifs = true;
+    try {
+      const uid = deviceSession.publicUid;
+      const docs = await runDual(
+        async () => {
+          const json = await proxyGet({ action: 'notifications', recipientUid: uid });
+          return Array.isArray(json.docs) ? json.docs : [];
+        },
+        async () => {
+          return await directQuery('', {
+            from: [{ collectionId: 'notifications' }],
+            where: {
+              compositeFilter: {
+                op: 'AND',
+                filters: [
+                  {
+                    fieldFilter: {
+                      field: { fieldPath: 'recipientUid' },
+                      op: 'EQUAL',
+                      value: { stringValue: uid }
+                    }
+                  },
+                  {
+                    fieldFilter: {
+                      field: { fieldPath: 'visibility' },
+                      op: 'EQUAL',
+                      value: { stringValue: 'public' }
+                    }
+                  }
+                ]
+              }
+            }
+          });
+        }
+      );
+
+      const list = docs
+        .filter(d => d && d.id && !String(d.id).startsWith('ntf_smoketest_'))
+        .map(mapRecordToNotification)
+        .sort((a, b) => (b._createdMs || 0) - (a._createdMs || 0));
+
+      const fp = list.map(n => n.id).join('|');
+      if (forceEmit || fp !== lastNotifsFingerprint) {
+        lastNotifsFingerprint = fp;
+        if (callbacks.onNotificationsSnapshot) callbacks.onNotificationsSnapshot(list);
+      }
+      return list;
+    } catch (_) {
+      return null;
+    } finally {
+      inFlightNotifs = false;
+    }
+  }
+
   function startPostsPolling() {
     if (postsPollTimer) clearInterval(postsPollTimer);
     fetchPublicPosts(true).catch(() => {});
+    fetchMyNotifications(true).catch(() => {});
     postsPollTimer = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       fetchPublicPosts(false).catch(() => {});
+      fetchMyNotifications(false).catch(() => {});
     }, 4000);
   }
 
@@ -503,7 +583,10 @@
       startPostsPolling();
 
       if (typeof window !== 'undefined') {
-        const triggerSync = () => fetchPublicPosts(false).catch(() => {});
+        const triggerSync = () => {
+          fetchPublicPosts(false).catch(() => {});
+          fetchMyNotifications(false).catch(() => {});
+        };
         window.addEventListener('focus', triggerSync);
         window.addEventListener('online', triggerSync);
         if (typeof document !== 'undefined') {
@@ -515,7 +598,11 @@
     },
 
     async forceRefresh() {
-      return (await fetchPublicPosts(true)) || [];
+      const [posts] = await Promise.all([
+        fetchPublicPosts(true),
+        fetchMyNotifications(true).catch(() => [])
+      ]);
+      return posts || [];
     },
 
     async publishPost(post) {
@@ -746,6 +833,70 @@
             ]).catch(() => {});
           }
         }
+      );
+      return true;
+    },
+
+    async likeComment(postId, commentId, nextLikes) {
+      if (!postId || !commentId) return false;
+      const likes = Math.max(0, Math.floor(Number(nextLikes) || 0));
+      await runDual(
+        () => proxyPost({ action: 'likeComment', postId, commentId, likes }),
+        () => directCommit([
+          {
+            update: {
+              name: `${DOC_PREFIX}/posts/${postId}/comments/${commentId}`,
+              fields: toFsFields({ likes })
+            },
+            updateMask: { fieldPaths: ['likes'] },
+            currentDocument: { exists: true }
+          }
+        ])
+      );
+      return true;
+    },
+
+    async sendNotification(opts) {
+      if (!opts) return false;
+      if (!deviceSession) deviceSession = loadOrCreateSession();
+      const recipientUid = String(opts.recipientUid || '').trim();
+      const postId = String(opts.postId || '').trim();
+      if (!recipientUid || !postId) return false;
+      // Do not notify yourself when interacting with your own post/comment
+      if (recipientUid === deviceSession.publicUid) return false;
+
+      const notificationId = 'ntf_' + Date.now() + '_' + randomHex(6);
+      const allowedTypes = ['LIKE', 'COMMENT', 'REPLY', 'BOOKMARK', 'COMMENT_LIKE'];
+      const allowedGroups = ['COMMENTS', 'REACTIONS', 'NOTES', 'SYSTEM'];
+      const type = allowedTypes.includes(opts.type) ? opts.type : 'LIKE';
+      const group = allowedGroups.includes(opts.group)
+        ? opts.group
+        : (type === 'COMMENT' || type === 'REPLY' ? 'COMMENTS' : 'REACTIONS');
+
+      const fields = {
+        recipientUid: recipientUid.slice(0, 128),
+        senderUid: deviceSession.publicUid.slice(0, 128),
+        senderNickname: String(opts.senderNickname || '央美同学').slice(0, 40),
+        senderAvatarSeed: Math.max(0, Math.min(1000000, Math.floor(Number(opts.senderAvatarSeed || 512)))),
+        type,
+        group,
+        postId: postId.slice(0, 128),
+        summary: String(opts.summary || '与你产生了新的互动').slice(0, 300),
+        visibility: 'public'
+      };
+
+      await runDual(
+        () => proxyPost({ action: 'createNotification', notificationId, fields }),
+        () => directCommit([
+          {
+            update: {
+              name: `${DOC_PREFIX}/notifications/${notificationId}`,
+              fields: toFsFields(fields)
+            },
+            updateTransforms: [{ fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }],
+            currentDocument: { exists: false }
+          }
+        ])
       );
       return true;
     },

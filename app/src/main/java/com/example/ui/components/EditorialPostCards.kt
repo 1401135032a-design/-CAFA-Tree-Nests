@@ -728,14 +728,14 @@ private fun PostFooterActions(
                     Icon(
                         imageVector = Icons.Outlined.DeleteOutline,
                         contentDescription = "删除帖子",
-                        tint = VermilionRed,
+                        tint = defaultTint,
                         modifier = Modifier.size(15.dp)
                     )
                     Text(
                         text = "删除",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Medium,
-                        color = VermilionRed
+                        color = defaultTint
                     )
                 }
             }

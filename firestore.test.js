@@ -281,3 +281,44 @@ test('6. Feedback dropbox allows write-only create to 1401135032@qq.com and deni
   // Reading feedbacks denied
   await assertFails(db.collection('feedbacks').doc('fb_001').get());
 });
+
+test('7. Notifications allow valid create and recipient-scoped public list, and block tampering/delete', async () => {
+  const db = getDb();
+  const validNotif = {
+    recipientUid: 'ym_recipient_001',
+    senderUid: 'ym_sender_002',
+    senderNickname: '花家地松节油',
+    senderAvatarSeed: 204,
+    type: 'LIKE',
+    group: 'REACTIONS',
+    postId: 'post_001',
+    summary: '赞了你的帖子「今晚画室有人吗」',
+    visibility: 'public',
+    createdAt: nowSafeDate()
+  };
+
+  await assertSucceeds(db.collection('notifications').doc('ntf_001').set(validNotif));
+
+  // Querying recipient's public notifications succeeds
+  await assertSucceeds(
+    db.collection('notifications')
+      .where('recipientUid', '==', 'ym_recipient_001')
+      .where('visibility', '==', 'public')
+      .get()
+  );
+
+  // Unfiltered list denied
+  await assertFails(db.collection('notifications').get());
+
+  // Invalid type or ghost field denied
+  await assertFails(
+    db.collection('notifications').doc('ntf_002').set({ ...validNotif, type: 'ADMIN_ALERT' })
+  );
+  await assertFails(
+    db.collection('notifications').doc('ntf_003').set({ ...validNotif, extraField: true })
+  );
+
+  // Update and delete denied
+  await assertFails(db.collection('notifications').doc('ntf_001').update({ summary: 'tampered' }));
+  await assertFails(db.collection('notifications').doc('ntf_001').delete());
+});

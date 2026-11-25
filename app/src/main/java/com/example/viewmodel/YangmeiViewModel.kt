@@ -167,6 +167,7 @@ class YangmeiViewModel(
             repository.refreshDailyHotTopics(currentLocalDayKey())
         }
         startRealtimeCloudPostsObserver()
+        startRealtimeCloudNotificationsObserver()
         startSilentMidnightHotTopicsScheduler()
     }
 
@@ -183,6 +184,20 @@ class YangmeiViewModel(
                 .collect { cloudDtos ->
                     repository.applyCloudPostsSnapshot(cloudDtos)
                     repository.recalculateHotTopicsForDay(currentLocalDayKey())
+                }
+        }
+    }
+
+    private fun startRealtimeCloudNotificationsObserver() {
+        viewModelScope.launch {
+            repository.observeMyCloudNotifications()
+                .catch { cause ->
+                    val firestoreEx = cause as? FirebaseFirestoreException
+                        ?: cause.cause as? FirebaseFirestoreException
+                    if (cause is CancellationException && firestoreEx == null) throw cause
+                }
+                .collect { notifDtos ->
+                    repository.applyCloudNotificationsSnapshot(notifDtos)
                 }
         }
     }

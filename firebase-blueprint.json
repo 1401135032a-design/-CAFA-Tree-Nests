@@ -86,6 +86,27 @@
         "userId", "authorNickname", "content", "targetEmail",
         "platform", "appVersion", "createdAt"
       ]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Real-time cross-device interaction notification for post likes, bookmarks, comments, and comment likes.",
+      "type": "object",
+      "properties": {
+        "recipientUid": { "type": "string" },
+        "senderUid": { "type": "string" },
+        "senderNickname": { "type": "string" },
+        "senderAvatarSeed": { "type": "integer" },
+        "type": { "type": "string", "enum": ["LIKE", "COMMENT", "REPLY", "BOOKMARK", "COMMENT_LIKE"] },
+        "group": { "type": "string", "enum": ["COMMENTS", "REACTIONS", "NOTES", "SYSTEM"] },
+        "postId": { "type": "string" },
+        "summary": { "type": "string" },
+        "visibility": { "type": "string", "enum": ["public"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "recipientUid", "senderUid", "senderNickname", "senderAvatarSeed",
+        "type", "group", "postId", "summary", "visibility", "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -100,6 +121,10 @@
     "/feedbacks/{feedbackId}": {
       "schema": { "$ref": "#/entities/Feedback" },
       "description": "Write-only user suggestions."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Real-time interaction notifications scoped by recipientUid."
     }
   }
 }

@@ -3143,13 +3143,13 @@ html.dark .pub-partition-hero {
   align-items: center;
   gap: 0.2rem;
   min-height: 2.25rem;
-  padding: 0 0.5625rem;
+  padding: 0 0.5rem;
   border-radius: 0.5rem;
   font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--vermilion);
-  background: rgba(239, 68, 68, 0.08);
-  transition: background 0.15s ease, transform 0.12s ease;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
 
 .footer-delete-btn svg {
@@ -3158,8 +3158,40 @@ html.dark .pub-partition-hero {
 }
 
 .footer-delete-btn:active {
-  background: rgba(239, 68, 68, 0.18);
+  background: var(--surface-variant);
+  color: var(--ink);
   transform: scale(0.96);
+}
+
+.comment-like-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 2rem;
+  padding: 0 0.4375rem;
+  border-radius: 0.5rem;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  background: transparent;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.comment-like-btn svg {
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.comment-like-btn.liked {
+  color: var(--vermilion);
+}
+
+.notif-unread-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--vermilion);
+  flex-shrink: 0;
+  margin-top: 0.375rem;
 }
 
 .btn-danger-full {
@@ -3174,64 +3206,6 @@ html.dark .pub-partition-hero {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-
-/* Swipe-Left-to-Reveal-Delete (左滑删除) */
-.swipe-hint-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.4375rem 1.125rem 0.25rem;
-  font-size: 0.72rem;
-  color: var(--ink-muted);
-}
-
-.swipe-delete-wrap {
-  position: relative;
-  overflow: hidden;
-  width: 100%;
-  touch-action: pan-y;
-  user-select: none;
-}
-
-.swipe-delete-action {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 5.5rem;
-  background: var(--vermilion);
-  color: #FFFFFF;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  z-index: 1;
-}
-
-.swipe-delete-action svg {
-  width: 1.25rem;
-  height: 1.25rem;
-}
-
-.swipe-delete-content {
-  position: relative;
-  z-index: 2;
-  background: var(--surface);
-  transform: translate3d(0, 0, 0);
-  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
-}
-
-.swipe-delete-wrap.swiping .swipe-delete-content {
-  transition: none;
-}
-
-.swipe-delete-wrap.open .swipe-delete-content {
-  transform: translate3d(-5.5rem, 0, 0);
 }
 
 /* Automatic Content Safety Moderation Banner & Modal */

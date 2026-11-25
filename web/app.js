@@ -327,6 +327,7 @@
       hotTopics: clone(D.INITIAL_HOT_TOPICS),
       hotTopicsDate: '',
       notifications: [],
+      readNotificationIds: [],
       drafts: [],
       settings: {
         notifyComments: true,
@@ -348,6 +349,7 @@
     merged.deletedPostIds = Array.isArray(parsed.deletedPostIds) ? parsed.deletedPostIds : [];
     merged.drafts = Array.isArray(parsed.drafts) ? parsed.drafts : [];
     merged.notifications = Array.isArray(parsed.notifications) ? parsed.notifications : [];
+    merged.readNotificationIds = Array.isArray(parsed.readNotificationIds) ? parsed.readNotificationIds : [];
 
     // Preserve all user-authored posts and merge seed posts cleanly without resurrecting deleted posts
     const deletedSet = new Set(merged.deletedPostIds);
@@ -811,6 +813,43 @@
     }
   }
 
+  let notificationsHydratedOnce = false;
+  const knownNotifIds = new Set();
+
+  function postSnippetText(post) {
+    const raw = String((post && (post.title || post.body)) || '校园动态').replace(/\s+/g, ' ').trim();
+    return raw.length > 22 ? raw.slice(0, 22) + '…' : raw;
+  }
+
+  function mergeCloudNotificationsIntoState(cloudNotifs) {
+    const incoming = Array.isArray(cloudNotifs) ? cloudNotifs : [];
+    const readSet = new Set(Array.isArray(state.readNotificationIds) ? state.readNotificationIds : []);
+    const existingLocal = (state.notifications || []).filter(n => n && !n._cloud);
+    const mergedCloud = incoming
+      .filter(n => n && n.id)
+      .map(n => ({
+        ...n,
+        _cloud: true,
+        isUnread: !readSet.has(n.id)
+      }));
+
+    let newlyArrivedUnread = null;
+    if (notificationsHydratedOnce) {
+      for (const n of mergedCloud) {
+        if (!knownNotifIds.has(n.id) && n.isUnread) {
+          newlyArrivedUnread = n;
+          break;
+        }
+      }
+    }
+    mergedCloud.forEach(n => knownNotifIds.add(n.id));
+    notificationsHydratedOnce = true;
+
+    const merged = [...mergedCloud, ...existingLocal].sort((a, b) => Number(b._createdMs || 0) - Number(a._createdMs || 0));
+    state.notifications = merged;
+    return newlyArrivedUnread;
+  }
+
   function initCloudBridge() {
     const cloud = getCloud();
     if (!cloud || cloud._yangmeiBound) return;
@@ -837,6 +876,18 @@
         const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
         if (!top || (top.name !== 'publish' && top.name !== 'verification' && top.name !== 'settings' && top.name !== 'search')) {
           render();
+        }
+      },
+      onNotificationsSnapshot(notifs) {
+        const fresh = mergeCloudNotificationsIntoState(notifs);
+        const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+        if (!top && nav.activeTab === 'messages') {
+          render();
+        } else {
+          renderBottomChrome();
+        }
+        if (fresh) {
+          showToast(`${fresh.senderName} ${fresh.summary}`);
         }
       },
       onSyncError(err) {
@@ -1195,9 +1246,12 @@
               <div style="flex:1;min-width:0;">
                 <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem;">
                   <strong style="font-size:0.875rem;">${esc(item.senderName)}</strong>
-                  <span style="font-size:0.75rem;color:var(--ink-muted);">${esc(item.createdAt)}</span>
+                  <div style="display:flex;align-items:center;gap:0.375rem;flex-shrink:0;">
+                    <span style="font-size:0.75rem;color:var(--ink-muted);">${esc(item.createdAt)}</span>
+                    ${item.isUnread ? '<span class="notif-unread-dot" aria-label="未读"></span>' : ''}
+                  </div>
                 </div>
-                <p style="margin:0.25rem 0 0;font-size:0.875rem;line-height:1.45;">${esc(item.summary)}</p>
+                <p style="margin:0.25rem 0 0;font-size:0.875rem;line-height:1.45;color:${item.isUnread ? 'var(--ink)' : 'var(--ink-secondary)'};">${esc(item.summary)}</p>
               </div>
             </div>
           </div>
@@ -1205,6 +1259,7 @@
       : `<div class="empty-state">
           <div style="width:2.125rem;height:2.125rem;color:var(--ink-muted);">${ICONS.bell}</div>
           <div class="empty-state-title" style="color:var(--ink-secondary);">暂无消息</div>
+          <div class="empty-state-sub">当有同学给你点赞、收藏或评论时，会实时提醒在这里</div>
         </div>`;
 
     return `
@@ -1730,6 +1785,11 @@
                     <p style="margin:0.3125rem 0 0;font-size:0.875rem;line-height:1.5;color:var(--ink);">
                       ${c.replyToNickname ? `<span style="color:var(--active-tint);">回复 ${esc(c.replyToNickname)}：</span>` : ''}${esc(c.content)}
                     </p>
+                    <div style="display:flex;align-items:center;justify-content:flex-end;margin-top:0.25rem;">
+                      <button class="comment-like-btn ${c.isLiked ? 'liked' : ''}" type="button" data-action="likeComment" data-post-id="${esc(post.id)}" data-comment-id="${esc(c.id)}" aria-label="点赞评论">
+                        ${c.isLiked ? ICONS.heartFilled : ICONS.heart}<span>${Number(c.likes || 0)}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               `;
@@ -2825,28 +2885,14 @@
   }
 
   // ---------------- Sub-Screen: PROFILE COLLECTION & SETTINGS ----------------
-  function renderSwipeDeleteWrapper(itemId, deleteAction, innerHtml) {
-    return `
-      <div class="swipe-delete-wrap" data-swipe-id="${esc(itemId)}">
-        <button class="swipe-delete-action" type="button" data-action="${esc(deleteAction)}" data-id="${esc(itemId)}" aria-label="删除">
-          ${ICONS.trash}
-          <span>删除</span>
-        </button>
-        <div class="swipe-delete-content">${innerHtml}</div>
-      </div>
-    `;
-  }
-
   function renderProfileCollectionScreen(colKey) {
     const titles = {
       MY_POSTS: '我的帖子', MY_COMMENTS: '我的评论', MY_BOOKMARKS: '我的收藏',
       MY_DRAFTS: '我的草稿', MY_TRADES: '我的交易', MY_HELP: '我的求助'
     };
     let body = '';
-    let showSwipeHint = false;
     if (colKey === 'MY_DRAFTS') {
-      showSwipeHint = state.drafts.length > 0;
-      body = state.drafts.length ? state.drafts.map(d => renderSwipeDeleteWrapper(d.id, 'deleteDraft', `
+      body = state.drafts.length ? state.drafts.map(d => `
         <div class="post-card" style="padding:1rem;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <span class="mono-chip">${esc((D.CATEGORIES[d.category] || {}).titleCn || '草稿')} · 草稿</span>
@@ -2855,7 +2901,7 @@
           <div style="font-weight:700;margin-top:0.5rem;">${esc(d.title || '无标题草稿')}</div>
           <p style="margin:0.3125rem 0 0;font-size:0.8125rem;color:var(--ink-secondary);">${esc(d.body)}</p>
         </div>
-      `)).join('') : `<div class="empty-state"><div class="empty-state-title">暂无草稿</div><div class="empty-state-sub">发布页面支持随时暂存未写完的想法。</div></div>`;
+      `).join('') : `<div class="empty-state"><div class="empty-state-title">暂无草稿</div><div class="empty-state-sub">发布页面支持随时暂存未写完的想法。</div></div>`;
     } else if (colKey === 'MY_COMMENTS') {
       const mine = [];
       state.posts.forEach(post => {
@@ -2877,12 +2923,8 @@
       else if (colKey === 'MY_BOOKMARKS') items = state.posts.filter(p => p.isBookmarked);
       else if (colKey === 'MY_TRADES') items = state.posts.filter(p => p.isMine && p.category === 'MARKETPLACE');
       else if (colKey === 'MY_HELP') items = state.posts.filter(p => p.isMine && (p.category === 'LOST_FOUND' || p.category === 'MUTUAL_AID'));
-      showSwipeHint = allowDelete && items.length > 0;
       body = items.length
-        ? items.map(p => {
-            const cardHtml = renderEditorialPostCard(p, { allowDelete });
-            return allowDelete ? renderSwipeDeleteWrapper(p.id, 'confirmDeletePost', cardHtml) : cardHtml;
-          }).join('')
+        ? items.map(p => renderEditorialPostCard(p, { allowDelete })).join('')
         : `<div class="empty-state"><div class="empty-state-title">这里暂时空着</div><div class="empty-state-sub">当你发布或收藏内容后，记录会汇集在这里。</div></div>`;
     }
 
@@ -2895,7 +2937,6 @@
           </div>
         </div>
         <div class="scroll-area sub-scroll" style="padding-top:0.375rem;">
-          ${showSwipeHint ? `<div class="swipe-hint-bar"><span>向左滑动帖子卡片可快速删除</span><span>← 左滑</span></div>` : ''}
           ${body}
         </div>
       </div>
@@ -3364,109 +3405,6 @@
     }, { passive: true });
   }
 
-  // ---------------- Swipe-Left-to-Reveal-Delete Gesture ----------------
-  let activeSwipedWrap = null;
-  let lastSwipeDragTs = 0;
-
-  function closeOpenSwipes(exceptEl) {
-    document.querySelectorAll('.swipe-delete-wrap.open').forEach(el => {
-      if (el !== exceptEl) {
-        el.classList.remove('open');
-        const c = el.querySelector('.swipe-delete-content');
-        if (c) c.style.transform = '';
-      }
-    });
-    if (!exceptEl) activeSwipedWrap = null;
-  }
-
-  function attachSwipeDeleteHandlers() {
-    const wraps = document.querySelectorAll('.swipe-delete-wrap');
-    if (!wraps.length) return;
-    const ACTION_WIDTH = 88; // 5.5rem
-
-    wraps.forEach(wrap => {
-      const content = wrap.querySelector('.swipe-delete-content');
-      if (!content) return;
-
-      let startX = 0, startY = 0, baseOffset = 0, curOffset = 0;
-      let tracking = false, lockedHorizontal = false, lockedVertical = false;
-
-      function onStart(clientX, clientY) {
-        startX = clientX;
-        startY = clientY;
-        baseOffset = wrap.classList.contains('open') ? -ACTION_WIDTH : 0;
-        curOffset = baseOffset;
-        tracking = true;
-        lockedHorizontal = false;
-        lockedVertical = false;
-      }
-
-      function onMove(clientX, clientY, ev) {
-        if (!tracking || lockedVertical) return;
-        const dx = clientX - startX;
-        const dy = clientY - startY;
-        if (!lockedHorizontal) {
-          if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
-            lockedVertical = true;
-            tracking = false;
-            return;
-          }
-          if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
-            lockedHorizontal = true;
-            closeOpenSwipes(wrap);
-            wrap.classList.add('swiping');
-          } else {
-            return;
-          }
-        }
-        if (ev && ev.cancelable) ev.preventDefault();
-        curOffset = Math.max(-ACTION_WIDTH, Math.min(0, baseOffset + dx));
-        content.style.transform = `translate3d(${curOffset}px, 0, 0)`;
-      }
-
-      function onEnd() {
-        if (!tracking) return;
-        tracking = false;
-        wrap.classList.remove('swiping');
-        if (lockedHorizontal) {
-          lastSwipeDragTs = Date.now();
-          const shouldOpen = curOffset < -ACTION_WIDTH * 0.4;
-          content.style.transform = '';
-          if (shouldOpen) {
-            wrap.classList.add('open');
-            activeSwipedWrap = wrap;
-          } else {
-            wrap.classList.remove('open');
-            if (activeSwipedWrap === wrap) activeSwipedWrap = null;
-          }
-        }
-      }
-
-      content.addEventListener('touchstart', (e) => {
-        if (e.touches.length === 1) onStart(e.touches[0].clientX, e.touches[0].clientY);
-      }, { passive: true });
-      content.addEventListener('touchmove', (e) => {
-        if (e.touches.length === 1) onMove(e.touches[0].clientX, e.touches[0].clientY, e);
-      }, { passive: false });
-      content.addEventListener('touchend', onEnd, { passive: true });
-      content.addEventListener('touchcancel', onEnd, { passive: true });
-
-      // Desktop / mouse drag support for easy testing in preview
-      content.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
-        onStart(e.clientX, e.clientY);
-        const mm = (ev) => onMove(ev.clientX, ev.clientY, ev);
-        const mu = () => {
-          onEnd();
-          window.removeEventListener('mousemove', mm);
-          window.removeEventListener('mouseup', mu);
-        };
-        window.addEventListener('mousemove', mm);
-        window.addEventListener('mouseup', mu);
-      });
-    });
-  }
-
   function getCurrentScreenKey() {
     if (nav.stack.length > 0) {
       const top = nav.stack[nav.stack.length - 1];
@@ -3587,7 +3525,6 @@
     if (nav.stack.length === 0 && nav.activeTab === 'home') {
       attachPullToRefresh();
     }
-    attachSwipeDeleteHandlers();
     bindDynamicInputs();
   }
 
@@ -3723,7 +3660,17 @@
             saveState();
             const cloud = getCloud();
             if (cloud && cloud.isReady() && post._cloud) {
-              cloud.addComment(postId, post.authorUid || post.author.id, newComment, post.comments.length).catch(() => {});
+              const targetUid = post.authorUid || (post.author && post.author.id) || '';
+              cloud.addComment(postId, targetUid, newComment, post.comments.length).catch(() => {});
+              cloud.sendNotification({
+                recipientUid: targetUid,
+                type: 'COMMENT',
+                group: 'COMMENTS',
+                postId: post.id,
+                senderNickname: state.persona.nickname,
+                senderAvatarSeed: state.persona.avatarSeed,
+                summary: `评论了你的帖子「${postSnippetText(post)}」：${text.slice(0, 60)}`
+              }).catch(() => {});
             }
             render();
             showToast('评论已发布');
@@ -3881,6 +3828,47 @@
           const cloud = getCloud();
           if (cloud && cloud.isReady() && p._cloud) {
             cloud.updatePostCounters(p.id, { likeCount: p.likeCount }).catch(() => {});
+            if (p.isLiked) {
+              cloud.sendNotification({
+                recipientUid: p.authorUid || (p.author && p.author.id) || '',
+                type: 'LIKE',
+                group: 'REACTIONS',
+                postId: p.id,
+                senderNickname: state.persona.nickname,
+                senderAvatarSeed: state.persona.avatarSeed,
+                summary: `赞了你的帖子「${postSnippetText(p)}」`
+              }).catch(() => {});
+            }
+          }
+          render();
+        }
+        return;
+      }
+
+      if (act === 'likeComment') {
+        const postId = actionEl.getAttribute('data-post-id');
+        const commentId = actionEl.getAttribute('data-comment-id');
+        const p = state.posts.find(x => x.id === postId);
+        const c = p && (p.comments || []).find(item => item.id === commentId);
+        if (p && c) {
+          c.isLiked = !c.isLiked;
+          c.likes = Math.max(0, Number(c.likes || 0) + (c.isLiked ? 1 : -1));
+          saveState();
+          const cloud = getCloud();
+          if (cloud && cloud.isReady() && p._cloud) {
+            cloud.likeComment(p.id, c.id, c.likes).catch(() => {});
+            if (c.isLiked) {
+              const snippet = String(c.content || '').replace(/\s+/g, ' ').trim().slice(0, 24);
+              cloud.sendNotification({
+                recipientUid: c.authorUid || (c.author && c.author.id) || '',
+                type: 'COMMENT_LIKE',
+                group: 'REACTIONS',
+                postId: p.id,
+                senderNickname: state.persona.nickname,
+                senderAvatarSeed: state.persona.avatarSeed,
+                summary: `赞了你的评论「${snippet}」`
+              }).catch(() => {});
+            }
           }
           render();
         }
@@ -3896,6 +3884,17 @@
           const cloud = getCloud();
           if (cloud && cloud.isReady() && p._cloud) {
             cloud.updatePostCounters(p.id, { bookmarkCount: p.bookmarkCount }).catch(() => {});
+            if (p.isBookmarked) {
+              cloud.sendNotification({
+                recipientUid: p.authorUid || (p.author && p.author.id) || '',
+                type: 'BOOKMARK',
+                group: 'REACTIONS',
+                postId: p.id,
+                senderNickname: state.persona.nickname,
+                senderAvatarSeed: state.persona.avatarSeed,
+                summary: `收藏了你的帖子「${postSnippetText(p)}」`
+              }).catch(() => {});
+            }
           }
           render();
           showToast(p.isBookmarked ? '已加入我的收藏' : '已取消收藏');
@@ -4195,10 +4194,32 @@
 
       // Messages
       if (act === 'msgFilter') { state.msgFilter = actionEl.getAttribute('data-key'); render(); return; }
-      if (act === 'markAllRead') { state.notifications.forEach(n => { n.isUnread = false; }); saveState(); render(); return; }
+      if (act === 'markAllRead') {
+        const readSet = new Set(Array.isArray(state.readNotificationIds) ? state.readNotificationIds : []);
+        state.notifications.forEach(n => {
+          n.isUnread = false;
+          if (n && n.id) readSet.add(n.id);
+        });
+        state.readNotificationIds = Array.from(readSet);
+        saveState();
+        render();
+        return;
+      }
       if (act === 'readNotif') {
         const n = state.notifications.find(x => x.id === actionEl.getAttribute('data-id'));
-        if (n) { n.isUnread = false; saveState(); render(); }
+        if (n) {
+          n.isUnread = false;
+          if (!Array.isArray(state.readNotificationIds)) state.readNotificationIds = [];
+          if (n.id && !state.readNotificationIds.includes(n.id)) {
+            state.readNotificationIds.push(n.id);
+          }
+          saveState();
+          if (n.postId && state.posts.some(p => p.id === n.postId)) {
+            pushScreen('postDetail', { id: n.postId });
+          } else {
+            render();
+          }
+        }
         return;
       }
 
@@ -4733,14 +4754,6 @@
         showToast('已清理图片内存与本地缓存');
         return;
       }
-      return;
-    }
-
-    // If a swipe-delete row is currently open or just finished dragging, close it instead of opening post
-    if (Date.now() - lastSwipeDragTs < 260) return;
-    const openSwipe = document.querySelector('.swipe-delete-wrap.open');
-    if (openSwipe) {
-      closeOpenSwipes(null);
       return;
     }
 

@@ -63,6 +63,22 @@ data class FirestoreCommentDto(
     @ServerTimestamp val createdAt: Timestamp? = null
 )
 
+@Keep
+@IgnoreExtraProperties
+data class FirestoreNotificationDto(
+    @DocumentId val id: String = "",
+    val recipientUid: String = "",
+    val senderUid: String = "",
+    val senderNickname: String = "央美同学",
+    val senderAvatarSeed: Int = 512,
+    val type: String = "LIKE",
+    val group: String = "REACTIONS",
+    val postId: String = "",
+    val summary: String = "",
+    val visibility: String = "public",
+    @ServerTimestamp val createdAt: Timestamp? = null
+)
+
 object FirestoreMappers {
     const val FEEDBACK_TARGET_EMAIL = "1401135032@qq.com"
 
@@ -254,6 +270,59 @@ object FirestoreMappers {
             replyToNickname = dto.replyToNickname,
             comfortTag = dto.comfortTag,
             cohortLabel = dto.cohortLabel
+        )
+    }
+
+    fun toNotificationCreateMap(
+        recipientUid: String,
+        senderUid: String,
+        senderNickname: String,
+        senderAvatarSeed: Int,
+        type: String,
+        group: String,
+        postId: String,
+        summary: String
+    ): Map<String, Any> {
+        return mapOf(
+            "recipientUid" to recipientUid.take(128),
+            "senderUid" to senderUid.take(128),
+            "senderNickname" to senderNickname.take(40).ifBlank { "央美同学" },
+            "senderAvatarSeed" to senderAvatarSeed.coerceIn(0, 1_000_000),
+            "type" to type,
+            "group" to group,
+            "postId" to postId.take(128),
+            "summary" to summary.take(300).ifBlank { "与你产生了新的互动" },
+            "visibility" to "public",
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+    }
+
+    fun fromNotificationDto(
+        dto: FirestoreNotificationDto,
+        readIds: Set<String>
+    ): NotificationItem {
+        val mappedType = when (dto.type) {
+            "COMMENT" -> NotificationType.COMMENT
+            "REPLY" -> NotificationType.REPLY
+            "BOOKMARK" -> NotificationType.BOOKMARK
+            "LIKE", "COMMENT_LIKE" -> NotificationType.LIKE
+            else -> NotificationType.LIKE
+        }
+        return NotificationItem(
+            id = dto.id,
+            type = mappedType,
+            sender = AnonymousPersona(
+                id = dto.senderUid.ifBlank { "anon" },
+                nickname = dto.senderNickname.ifBlank { "央美同学" },
+                avatarSeed = dto.senderAvatarSeed,
+                identityType = IdentityType.STUDENT,
+                isVerified = true
+            ),
+            summary = dto.summary.ifBlank { "与你产生了新的互动" },
+            quoteSnippet = null,
+            targetPostId = dto.postId.takeIf { it.isNotBlank() },
+            createdAt = formatRelativeTimestamp(dto.createdAt),
+            isUnread = !readIds.contains(dto.id)
         )
     }
 }

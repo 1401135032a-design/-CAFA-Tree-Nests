@@ -574,53 +574,46 @@ fun ProfileCollectionScreen(
                     if (uiState.drafts.isEmpty()) {
                         item { EmptyCollectionNotice("暂无草稿", "发布页面支持随时暂存未写完的想法。") }
                     } else {
-                        item(key = "swipe_hint_drafts") {
-                            SwipeDeleteHintBar("向左滑动草稿卡片可快速删除")
-                        }
                         items(uiState.drafts, key = { it.id }) { draft ->
-                            SwipeToRevealDeleteItem(
-                                onDelete = { onDeleteDraft(draft.id) }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .clickable { onOpenDraft(draft) }
                             ) {
                                 Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .clickable { onOpenDraft(draft) }
+                                    modifier = Modifier.padding(20.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Column(
-                                        modifier = Modifier.padding(20.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            MonoTagChip(text = "${draft.category.titleCn} · 草稿")
-                                            IconButton(onClick = { onDeleteDraft(draft.id) }) {
-                                                Icon(Icons.Outlined.Delete, contentDescription = "删除草稿", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
+                                        MonoTagChip(text = "${draft.category.titleCn} · 草稿")
+                                        IconButton(onClick = { onDeleteDraft(draft.id) }) {
+                                            Icon(Icons.Outlined.Delete, contentDescription = "删除草稿", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
-                                        Text(
-                                            text = draft.title.ifBlank { "无标题草稿" },
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = draft.body,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = "${draft.createdAt} · 点击继续编辑",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.outlineVariant
-                                        )
                                     }
-                                    EditorialHairline()
+                                    Text(
+                                        text = draft.title.ifBlank { "无标题草稿" },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = draft.body,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${draft.createdAt} · 点击继续编辑",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
                                 }
+                                EditorialHairline()
                             }
                         }
                     }
@@ -687,34 +680,19 @@ fun ProfileCollectionScreen(
                             )
                         }
                     } else {
-                        if (allowDelete) {
-                            item(key = "swipe_hint_posts") {
-                                SwipeDeleteHintBar("向左滑动帖子卡片可快速删除")
-                            }
-                        }
                         items(itemsList, key = { it.id }) { post ->
-                            val cardContent: @Composable () -> Unit = {
-                                EditorialPostCard(
-                                    post = post,
-                                    onPostClick = { onOpenPost(post.id) },
-                                    onTopicClick = onOpenTopic,
-                                    onLikeClick = { onLikePost(post.id) },
-                                    onBookmarkClick = { onBookmarkPost(post.id) },
-                                    onShareClick = { onSharePost(post) },
-                                    onVoteOption = { optId -> onVotePoll(post.id, optId) },
-                                    onDeleteClick = if (allowDelete && post.isMine) {
-                                        { pendingDeletePost = post }
-                                    } else null
-                                )
-                            }
-                            if (allowDelete && post.isMine) {
-                                SwipeToRevealDeleteItem(
-                                    onDelete = { pendingDeletePost = post },
-                                    content = cardContent
-                                )
-                            } else {
-                                cardContent()
-                            }
+                            EditorialPostCard(
+                                post = post,
+                                onPostClick = { onOpenPost(post.id) },
+                                onTopicClick = onOpenTopic,
+                                onLikeClick = { onLikePost(post.id) },
+                                onBookmarkClick = { onBookmarkPost(post.id) },
+                                onShareClick = { onSharePost(post) },
+                                onVoteOption = { optId -> onVotePoll(post.id, optId) },
+                                onDeleteClick = if (allowDelete && post.isMine) {
+                                    { pendingDeletePost = post }
+                                } else null
+                            )
                         }
                     }
                 }

@@ -74,8 +74,11 @@ class YangmeiRepository(
     private val deletedPostIds = mutableSetOf<String>()
     private val likedPostIds = mutableSetOf<String>()
     private val bookmarkedPostIds = mutableSetOf<String>()
+    private val readNotificationIds = mutableSetOf<String>()
     private val cloudPostDtos = mutableMapOf<String, FirestorePostDto>()
     private val cloudCommentsByPost = mutableMapOf<String, List<Comment>>()
+    private var cloudNotificationDtos: List<FirestoreNotificationDto> = emptyList()
+    private val localPushedNotifications = mutableListOf<NotificationItem>()
     private val seedPostIds: Set<String> = MockSeedData.initialPosts.map { it.id }.toSet()
     private var localSavedUserPosts: List<Post> = emptyList()
     private var seedExtraComments: MutableMap<String, List<Comment>> = mutableMapOf()
@@ -171,6 +174,84 @@ class YangmeiRepository(
             }
         }
         rebuildMergedPosts()
+    }
+
+    fun observeMyCloudNotifications(): Flow<List<FirestoreNotificationDto>> {
+        val uid = currentUid
+        if (uid.isBlank()) return kotlinx.coroutines.flow.flowOf(emptyList())
+        return db.collection("notifications")
+            .whereEqualTo("recipientUid", uid)
+            .whereEqualTo("visibility", "public")
+            .snapshots()
+            .map { snapshot ->
+                snapshot.documents
+                    .mapNotNull { doc ->
+                        try {
+                            doc.toObject(
+                                FirestoreNotificationDto::class.java,
+                                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                            )
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                    .filterNot { it.id.startsWith("ntf_smoketest_") }
+                    .sortedByDescending { it.createdAt?.toDate()?.time ?: 0L }
+            }
+    }
+
+    fun applyCloudNotificationsSnapshot(dtos: List<FirestoreNotificationDto>) {
+        cloudNotificationDtos = dtos
+        rebuildMergedNotifications()
+    }
+
+    private fun rebuildMergedNotifications() {
+        val cloudItems = cloudNotificationDtos.map { dto ->
+            FirestoreMappers.fromNotificationDto(dto, readNotificationIds)
+        }
+        val localItems = localPushedNotifications.map { item ->
+            item.copy(isUnread = item.isUnread && !readNotificationIds.contains(item.id))
+        }
+        _notifications.value = cloudItems + localItems
+    }
+
+    private fun postSnippetText(post: Post?): String {
+        val raw = (post?.title?.takeIf { it.isNotBlank() } ?: post?.body ?: "校园动态")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return if (raw.length > 22) raw.take(22) + "…" else raw
+    }
+
+    private fun sendCloudNotification(
+        recipientUid: String,
+        type: String,
+        group: String,
+        postId: String,
+        summary: String
+    ) {
+        val cleanRecipient = recipientUid.trim()
+        if (cleanRecipient.isBlank() || cleanRecipient == currentUid || postId.isBlank()) return
+        val persona = _currentPersona.value
+        val notifId = "ntf_${System.currentTimeMillis()}_${(100000..999999).random()}"
+        ioScope.launch {
+            try {
+                val payload = FirestoreMappers.toNotificationCreateMap(
+                    recipientUid = cleanRecipient,
+                    senderUid = currentUid,
+                    senderNickname = persona.nickname,
+                    senderAvatarSeed = persona.avatarSeed,
+                    type = type,
+                    group = group,
+                    postId = postId,
+                    summary = summary
+                )
+                db.collection("notifications").document(notifId).set(payload).await()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Non-critical notification dispatch
+            }
+        }
     }
 
     suspend fun forceRefreshFromCloud(): Result<Int> {
@@ -399,6 +480,12 @@ class YangmeiRepository(
                     if (id.isNotBlank()) bookmarkedPostIds.add(id)
                 }
             }
+            root.optJSONArray("readNotificationIds")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val id = arr.optString(i)
+                    if (id.isNotBlank()) readNotificationIds.add(id)
+                }
+            }
             seedExtraComments.clear()
             root.optJSONObject("seedComments")?.let { obj ->
                 val keys = obj.keys()
@@ -414,6 +501,7 @@ class YangmeiRepository(
             }
 
             rebuildMergedPosts()
+            rebuildMergedNotifications()
 
             val draftsArr = root.optJSONArray("drafts")
             if (draftsArr != null) {
@@ -436,6 +524,7 @@ class YangmeiRepository(
         val deletedSnapshot = deletedPostIds.toList()
         val likedSnapshot = likedPostIds.toList()
         val bookmarkedSnapshot = bookmarkedPostIds.toList()
+        val readNotifSnapshot = readNotificationIds.toList()
         ioScope.launch {
             try {
                 val root = JSONObject()
@@ -453,6 +542,7 @@ class YangmeiRepository(
 
                 root.put("likedSeedIds", JSONArray(likedSnapshot))
                 root.put("bookmarkedSeedIds", JSONArray(bookmarkedSnapshot))
+                root.put("readNotificationIds", JSONArray(readNotifSnapshot))
 
                 val seedCommentsObj = JSONObject()
                 postsSnapshot.filter { seedPostIds.contains(it.id) && !it.isMine }.forEach { post ->
@@ -956,9 +1046,11 @@ class YangmeiRepository(
     override fun toggleLike(postId: String) {
         var nowLiked = false
         var newLikeCount = 0
+        var targetPost: Post? = null
         _posts.update { list ->
             list.map { post ->
                 if (post.id == postId) {
+                    targetPost = post
                     nowLiked = !post.isLiked
                     newLikeCount = (post.likeCount + if (nowLiked) 1 else -1).coerceAtLeast(0)
                     post.copy(isLiked = nowLiked, likeCount = newLikeCount)
@@ -969,6 +1061,16 @@ class YangmeiRepository(
         persistUserContentAsync()
 
         if (cloudPostDtos.containsKey(postId)) {
+            if (nowLiked) {
+                val recipientUid = cloudPostDtos[postId]?.authorUid ?: targetPost?.author?.id.orEmpty()
+                sendCloudNotification(
+                    recipientUid = recipientUid,
+                    type = "LIKE",
+                    group = "REACTIONS",
+                    postId = postId,
+                    summary = "赞了你的帖子「${postSnippetText(targetPost)}」"
+                )
+            }
             ioScope.launch {
                 try {
                     db.collection("posts").document(postId).update(
@@ -1017,9 +1119,11 @@ class YangmeiRepository(
     override fun toggleBookmark(postId: String) {
         var nowSaved = false
         var newBookmarkCount = 0
+        var targetPost: Post? = null
         _posts.update { list ->
             list.map { post ->
                 if (post.id == postId) {
+                    targetPost = post
                     nowSaved = !post.isBookmarked
                     newBookmarkCount = (post.bookmarkCount + if (nowSaved) 1 else -1).coerceAtLeast(0)
                     post.copy(isBookmarked = nowSaved, bookmarkCount = newBookmarkCount)
@@ -1030,6 +1134,16 @@ class YangmeiRepository(
         persistUserContentAsync()
 
         if (cloudPostDtos.containsKey(postId)) {
+            if (nowSaved) {
+                val recipientUid = cloudPostDtos[postId]?.authorUid ?: targetPost?.author?.id.orEmpty()
+                sendCloudNotification(
+                    recipientUid = recipientUid,
+                    type = "BOOKMARK",
+                    group = "REACTIONS",
+                    postId = postId,
+                    summary = "收藏了你的帖子「${postSnippetText(targetPost)}」"
+                )
+            }
             ioScope.launch {
                 try {
                     db.collection("posts").document(postId).update(
@@ -1051,9 +1165,11 @@ class YangmeiRepository(
         val authoredComment = comment.copy(author = comment.author.copy(id = currentUid))
         var nextCommentCount = 0
         var postAuthorUid = currentUid
+        var targetPost: Post? = null
         _posts.update { list ->
             list.map { post ->
                 if (post.id == postId) {
+                    targetPost = post
                     postAuthorUid = cloudPostDtos[postId]?.authorUid ?: post.author.id
                     val updatedComments = post.comments + authoredComment
                     nextCommentCount = updatedComments.size
@@ -1067,6 +1183,13 @@ class YangmeiRepository(
         persistUserContentAsync()
 
         if (cloudPostDtos.containsKey(postId)) {
+            sendCloudNotification(
+                recipientUid = postAuthorUid,
+                type = "COMMENT",
+                group = "COMMENTS",
+                postId = postId,
+                summary = "评论了你的帖子「${postSnippetText(targetPost)}」：${authoredComment.content.take(60)}"
+            )
             ioScope.launch {
                 try {
                     val payload = FirestoreMappers.toCommentCreateMap(
@@ -1101,13 +1224,17 @@ class YangmeiRepository(
 
     fun toggleCommentLike(postId: String, commentId: String) {
         var nextLikes = 0
+        var nowLiked = false
+        var targetComment: Comment? = null
         _posts.update { list ->
             list.map { post ->
                 if (post.id == postId) {
                     post.copy(
                         comments = post.comments.map { c ->
                             if (c.id == commentId) {
+                                targetComment = c
                                 val liked = !c.isLiked
+                                nowLiked = liked
                                 nextLikes = (c.likes + if (liked) 1 else -1).coerceAtLeast(0)
                                 c.copy(isLiked = liked, likes = nextLikes)
                             } else c
@@ -1119,6 +1246,18 @@ class YangmeiRepository(
         persistUserContentAsync()
 
         if (cloudPostDtos.containsKey(postId)) {
+            if (nowLiked) {
+                val commentObj = targetComment
+                if (commentObj != null) {
+                    sendCloudNotification(
+                        recipientUid = commentObj.author.id,
+                        type = "COMMENT_LIKE",
+                        group = "REACTIONS",
+                        postId = postId,
+                        summary = "赞了你的评论「${commentObj.content.take(24)}」"
+                    )
+                }
+            }
             ioScope.launch {
                 try {
                     db.collection("posts")
@@ -1234,16 +1373,21 @@ class YangmeiRepository(
     }
 
     override fun markNotificationRead(notificationId: String) {
+        readNotificationIds.add(notificationId)
         _notifications.update { list ->
             list.map { n -> if (n.id == notificationId) n.copy(isUnread = false) else n }
         }
+        persistUserContentAsync()
     }
 
     override fun markAllNotificationsRead() {
+        _notifications.value.forEach { readNotificationIds.add(it.id) }
         _notifications.update { list -> list.map { it.copy(isUnread = false) } }
+        persistUserContentAsync()
     }
 
     override fun pushNotification(item: NotificationItem) {
-        _notifications.update { listOf(item) + it }
+        localPushedNotifications.add(0, item)
+        rebuildMergedNotifications()
     }
 }

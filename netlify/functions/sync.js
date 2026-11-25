@@ -172,6 +172,46 @@ exports.handler = async function (event) {
         };
       }
 
+      if (action === 'notifications') {
+        const recipientUid = String(qs.recipientUid || '').trim();
+        if (!isValidDocId(recipientUid)) {
+          return {
+            statusCode: 400,
+            headers: JSON_HEADERS,
+            body: JSON.stringify({ ok: false, error: 'Invalid recipientUid' })
+          };
+        }
+        const docs = (await runFirestoreQuery('', {
+          from: [{ collectionId: 'notifications' }],
+          where: {
+            compositeFilter: {
+              op: 'AND',
+              filters: [
+                {
+                  fieldFilter: {
+                    field: { fieldPath: 'recipientUid' },
+                    op: 'EQUAL',
+                    value: { stringValue: recipientUid }
+                  }
+                },
+                {
+                  fieldFilter: {
+                    field: { fieldPath: 'visibility' },
+                    op: 'EQUAL',
+                    value: { stringValue: 'public' }
+                  }
+                }
+              ]
+            }
+          }
+        })).filter(d => d && d.id && !String(d.id).startsWith('ntf_smoketest_'));
+        return {
+          statusCode: 200,
+          headers: JSON_HEADERS,
+          body: JSON.stringify({ ok: true, docs })
+        };
+      }
+
       return {
         statusCode: 400,
         headers: JSON_HEADERS,
@@ -314,6 +354,47 @@ exports.handler = async function (event) {
           {
             update: {
               name: `${DOC_PREFIX}/feedbacks/${feedbackId}`,
+              fields: toFsFields(fields)
+            },
+            updateTransforms: [
+              { fieldPath: 'createdAt', setToServerValue: 'REQUEST_TIME' }
+            ],
+            currentDocument: { exists: false }
+          }
+        ]);
+        return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify({ ok: true }) };
+      }
+
+      if (action === 'likeComment') {
+        const postId = body.postId;
+        const commentId = body.commentId;
+        const likes = Number(body.likes);
+        if (!isValidDocId(postId) || !isValidDocId(commentId) || !Number.isFinite(likes)) {
+          return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify({ ok: false, error: 'Invalid likeComment payload' }) };
+        }
+        await commitFirestore([
+          {
+            update: {
+              name: `${DOC_PREFIX}/posts/${postId}/comments/${commentId}`,
+              fields: toFsFields({ likes: Math.max(0, Math.floor(likes)) })
+            },
+            updateMask: { fieldPaths: ['likes'] },
+            currentDocument: { exists: true }
+          }
+        ]);
+        return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify({ ok: true }) };
+      }
+
+      if (action === 'createNotification') {
+        const notificationId = body.notificationId;
+        const fields = body.fields || {};
+        if (!isValidDocId(notificationId)) {
+          return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify({ ok: false, error: 'Invalid notificationId' }) };
+        }
+        await commitFirestore([
+          {
+            update: {
+              name: `${DOC_PREFIX}/notifications/${notificationId}`,
               fields: toFsFields(fields)
             },
             updateTransforms: [

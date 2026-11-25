@@ -123,6 +123,27 @@ service cloud.firestore {
         && data.createdAt is timestamp && data.createdAt <= request.time;
     }
 
+    function isValidNotification(data) {
+      return data.keys().hasAll([
+          'recipientUid', 'senderUid', 'senderNickname', 'senderAvatarSeed',
+          'type', 'group', 'postId', 'summary', 'visibility', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'recipientUid', 'senderUid', 'senderNickname', 'senderAvatarSeed',
+          'type', 'group', 'postId', 'summary', 'visibility', 'createdAt'
+        ])
+        && data.recipientUid is string && data.recipientUid.size() >= 1 && data.recipientUid.size() <= 128
+        && data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128
+        && data.senderNickname is string && data.senderNickname.size() >= 1 && data.senderNickname.size() <= 40
+        && data.senderAvatarSeed is int && data.senderAvatarSeed >= 0 && data.senderAvatarSeed <= 1000000
+        && data.type in ['LIKE', 'COMMENT', 'REPLY', 'BOOKMARK', 'COMMENT_LIKE']
+        && data.group in ['COMMENTS', 'REACTIONS', 'NOTES', 'SYSTEM']
+        && data.postId is string && data.postId.size() >= 1 && data.postId.size() <= 128
+        && data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 300
+        && data.visibility == 'public'
+        && data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
     match /posts/{postId} {
       // Only active public posts can be read or listed; deleted tombstones are unreadable by anyone
       allow get, list: if resource.data.visibility == 'public';
@@ -201,6 +222,12 @@ service cloud.firestore {
     match /feedbacks/{feedbackId} {
       allow get, list: if false;
       allow create: if isValidId(feedbackId) && isValidFeedback(incoming());
+      allow update, delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow get, list: if resource.data.visibility == 'public';
+      allow create: if isValidId(notificationId) && isValidNotification(incoming());
       allow update, delete: if false;
     }
   }
