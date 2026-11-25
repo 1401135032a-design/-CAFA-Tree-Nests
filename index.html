@@ -12,7 +12,8 @@
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="icon" type="image/jpeg" href="./app/src/main/res/drawable/ic_yangmei_logo.jpg" />
   <link rel="apple-touch-icon" href="./app/src/main/res/drawable/ic_yangmei_logo.jpg" />
-  <link rel="stylesheet" href="./web/styles.css?v=9" />
+  <link rel="preload" as="image" href="./web/logo-dark.png" />
+  <link rel="stylesheet" href="./web/styles.css?v=11" />
 </head>
 <body>
   <div id="app-frame">
@@ -35,7 +36,7 @@
 
       <div class="splash-content">
         <div class="splash-logo-wrap">
-          <img id="splash-logo-img" data-yangmei-logo="dark" alt="杨梅树窝 Logo" />
+          <img id="splash-logo-img" src="./web/logo-dark.png" data-yangmei-logo="dark" alt="杨梅树窝 Logo" />
         </div>
 
         <h1 class="splash-title" aria-label="杨梅树窝">
@@ -72,9 +73,9 @@
     <div id="toast" role="status" aria-live="polite"></div>
   </div>
 
-  <script type="module" src="./web/cloud.js?v=9"></script>
-  <script src="./web/moderation.js?v=9"></script>
-  <script src="./web/data.js?v=9"></script>
-  <script src="./web/app.js?v=9"></script>
+  <script src="./web/cloud.js?v=11"></script>
+  <script src="./web/moderation.js?v=11"></script>
+  <script src="./web/data.js?v=11"></script>
+  <script src="./web/app.js?v=11"></script>
 </body>
 </html>

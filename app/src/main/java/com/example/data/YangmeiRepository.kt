@@ -166,7 +166,7 @@ class YangmeiRepository(
     fun applyCloudPostsSnapshot(dtos: List<FirestorePostDto>) {
         cloudPostDtos.clear()
         dtos.forEach { dto ->
-            if (dto.id.isNotBlank() && !deletedPostIds.contains(dto.id)) {
+            if (dto.id.isNotBlank() && !dto.id.startsWith("post_smoketest_") && !deletedPostIds.contains(dto.id)) {
                 cloudPostDtos[dto.id] = dto
             }
         }

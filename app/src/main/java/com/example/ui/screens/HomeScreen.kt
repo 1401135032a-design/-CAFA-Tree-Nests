@@ -66,9 +66,13 @@ fun HomeScreen(
     val tabListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    val seedPostIds = remember { MockSeedData.initialPosts.map { it.id }.toSet() }
     val feedPosts = remember(uiState.visiblePosts, selectedTab) {
         when (selectedTab) {
-            HomeFeedTab.RECOMMENDED -> uiState.visiblePosts.sortedByDescending { it.likeCount + it.comments.size * 3 }
+            HomeFeedTab.RECOMMENDED -> {
+                val (livePosts, seedPosts) = uiState.visiblePosts.partition { it.id !in seedPostIds }
+                livePosts + seedPosts.sortedByDescending { it.likeCount + it.comments.size * 3 }
+            }
             HomeFeedTab.LATEST -> uiState.visiblePosts
             HomeFeedTab.RELATIONSHIP -> uiState.visiblePosts.filter { it.category == PostCategory.RELATIONSHIP }
             HomeFeedTab.MARKETPLACE -> uiState.visiblePosts.filter { it.category == PostCategory.MARKETPLACE }

@@ -92,149 +92,25 @@
     return ICONS[(info && info.icon) || 'sparkle'] || ICONS.sparkle;
   }
 
-  // ---------------- Exact YangmeiTransparentLogo Processor (YangmeiBrandMark.kt) ----------------
-  const logoCache = { dark: null, light: null, ready: false };
-
-  function lerpRgb(a, b, t) {
-    const ct = Math.max(0, Math.min(1, t));
-    const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
-    const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
-    return [
-      Math.round(ar + (br - ar) * ct),
-      Math.round(ag + (bg - ag) * ct),
-      Math.round(ab + (bb - ab) * ct)
-    ];
-  }
-
-  function sampleIridescent(nx, ny, onDark) {
-    const stops = onDark
-      ? [0x818CF8, 0xC084FC, 0xF472B6, 0x22D3EE, 0x34D399, 0x818CF8]
-      : [0x4F46E5, 0x9333EA, 0xDB2777, 0x0891B2, 0x0EA5E9, 0x4F46E5];
-    let u = nx * 0.62 + ny * 0.58 + Math.sin((nx - ny) * Math.PI) * 0.08;
-    u = Math.max(0, Math.min(0.9999, u));
-    const scaled = u * (stops.length - 1);
-    const idx = Math.min(stops.length - 2, Math.floor(scaled));
-    return lerpRgb(stops[idx], stops[idx + 1], scaled - idx);
-  }
+  // ---------------- Pre-baked Iridescent Hollow Logo (matches YangmeiBrandMark.kt, zero flash) ----------------
+  const STATIC_LOGO_DARK = './web/logo-dark.png';
+  const STATIC_LOGO_LIGHT = './web/logo-light.png';
 
   function buildHollowLogos() {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload = function () {
-      try {
-        const workSize = 240;
-        const c = document.createElement('canvas');
-        c.width = workSize;
-        c.height = workSize;
-        const ctx = c.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, workSize, workSize);
-        const raw = ctx.getImageData(0, 0, workSize, workSize).data;
-
-        const mask = new Uint8Array(workSize * workSize);
-        let minX = workSize, minY = workSize, maxX = 0, maxY = 0;
-        for (let y = 0; y < workSize; y++) {
-          for (let x = 0; x < workSize; x++) {
-            const p = (y * workSize + x) * 4;
-            const maxC = Math.max(raw[p], raw[p + 1], raw[p + 2]);
-            let a = 0;
-            if (maxC >= 104) a = 255;
-            else if (maxC > 50) a = Math.round(((maxC - 50) * 255) / 54);
-            mask[y * workSize + x] = a;
-            if (a > 36) {
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-            }
-          }
-        }
-        if (minX >= maxX || minY >= maxY) {
-          minX = 0; minY = 0; maxX = workSize - 1; maxY = workSize - 1;
-        }
-        const boxW = maxX - minX + 1;
-        const boxH = maxY - minY + 1;
-        const side = Math.min(workSize, Math.round(Math.max(boxW, boxH) * 1.08));
-        const cx = Math.floor((minX + maxX) / 2);
-        const cy = Math.floor((minY + maxY) / 2);
-        const cropX = Math.max(0, Math.min(workSize - side, cx - Math.floor(side / 2)));
-        const cropY = Math.max(0, Math.min(workSize - side, cy - Math.floor(side / 2)));
-        const r = Math.max(2, Math.min(4, Math.floor(side * 0.016)));
-        const r2 = r * r;
-
-        function renderVariant(onDark) {
-          const outC = document.createElement('canvas');
-          outC.width = side;
-          outC.height = side;
-          const octx = outC.getContext('2d');
-          const imgData = octx.createImageData(side, side);
-          const d = imgData.data;
-          for (let oy = 0; oy < side; oy++) {
-            const sy = cropY + oy;
-            const ny = oy / Math.max(1, side - 1);
-            for (let ox = 0; ox < side; ox++) {
-              const sx = cropX + ox;
-              const centerMask = mask[sy * workSize + sx];
-              if (centerMask <= 10) continue;
-              let minN = 255;
-              for (let dy = -r; dy <= r && minN > 0; dy++) {
-                const nRow = Math.max(0, Math.min(workSize - 1, sy + dy)) * workSize;
-                for (let dx = -r; dx <= r; dx++) {
-                  if (dx * dx + dy * dy <= r2) {
-                    const nxIdx = Math.max(0, Math.min(workSize - 1, sx + dx));
-                    const v = mask[nRow + nxIdx];
-                    if (v < minN) {
-                      minN = v;
-                      if (minN === 0) break;
-                    }
-                  }
-                }
-              }
-              const rawAlpha = Math.max(0, Math.min(255, centerMask - Math.floor(minN * 0.94)));
-              const alpha = rawAlpha > 14 ? Math.min(255, Math.floor(rawAlpha * 1.32)) : 0;
-              if (alpha > 0) {
-                const nx = ox / Math.max(1, side - 1);
-                const rgb = sampleIridescent(nx, ny, onDark);
-                const idx = (oy * side + ox) * 4;
-                d[idx] = rgb[0];
-                d[idx + 1] = rgb[1];
-                d[idx + 2] = rgb[2];
-                d[idx + 3] = alpha;
-              }
-            }
-          }
-          octx.putImageData(imgData, 0, 0);
-          return outC.toDataURL('image/png');
-        }
-
-        logoCache.dark = renderVariant(true);
-        logoCache.light = renderVariant(false);
-        logoCache.ready = true;
-        refreshLogoImages();
-      } catch (e) {
-        // Fallback SVG logo already displayed
-      }
-    };
-    img.src = D.IMAGES.logo;
-  }
-
-  function fallbackSvgLogo(onDark) {
-    const c1 = onDark ? '#818CF8' : '#4F46E5';
-    const c2 = onDark ? '#F472B6' : '#DB2777';
-    const c3 = onDark ? '#22D3EE' : '#0891B2';
-    return 'data:image/svg+xml;utf8,' + encodeURIComponent(
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="50%" stop-color="${c2}"/><stop offset="100%" stop-color="${c3}"/></linearGradient></defs><circle cx="50" cy="48" r="34" fill="none" stroke="url(#g)" stroke-width="3.5"/><path d="M50 82V50M50 54L33 38M50 58L67 42" fill="none" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/><circle cx="33" cy="36" r="6" fill="none" stroke="url(#g)" stroke-width="3"/><circle cx="67" cy="40" r="6" fill="none" stroke="url(#g)" stroke-width="3"/><circle cx="50" cy="27" r="7" fill="none" stroke="url(#g)" stroke-width="3"/></svg>`
-    );
+    // Pre-warm light variant in browser cache silently; splash dark logo is already preloaded in HTML
+    const preloadLight = new Image();
+    preloadLight.src = STATIC_LOGO_LIGHT;
   }
 
   function getLogoSrc(onDark) {
-    if (logoCache.ready) return onDark ? logoCache.dark : logoCache.light;
-    return fallbackSvgLogo(onDark);
+    return onDark ? STATIC_LOGO_DARK : STATIC_LOGO_LIGHT;
   }
 
   function refreshLogoImages() {
     document.querySelectorAll('img[data-yangmei-logo]').forEach(function (el) {
       const dark = el.getAttribute('data-yangmei-logo') === 'dark';
-      el.src = getLogoSrc(dark);
+      const target = getLogoSrc(dark);
+      if (el.getAttribute('src') !== target) el.src = target;
     });
   }
 
@@ -834,6 +710,7 @@
     marqueePaused: false,
     homeTabsScrollLeft: 0,
     scrollMap: {},
+    hScrollMap: {},
     lastScreenKey: '',
     cloudConnected: false,
     account: null,
@@ -873,6 +750,8 @@
     });
   }
 
+  const autoSyncAttempted = new Set();
+
   function mergeCloudPostsIntoState(cloudPosts) {
     nav.cloudPosts = Array.isArray(cloudPosts) ? cloudPosts : [];
     const deletedSet = new Set(Array.isArray(state.deletedPostIds) ? state.deletedPostIds : []);
@@ -887,6 +766,7 @@
         const isMine = Boolean(cp.isMine || (currentUid && cp.authorUid === currentUid) || (local && local.isMine));
         return {
           ...cp,
+          _cloud: true,
           isMine,
           isLiked: local ? Boolean(local.isLiked) : false,
           isBookmarked: local ? Boolean(local.isBookmarked) : false,
@@ -906,6 +786,29 @@
 
     state.posts = [...mergedCloud, ...localOnlyPosts, ...seedPosts];
     recalculateHotTopicsForDay(getLocalDayKey(), true);
+
+    // Automatically retry uploading any unsynced local posts created by this user
+    const cloud = getCloud();
+    if (cloud && cloud.isReady() && nav.cloudConnected && localOnlyPosts.length > 0) {
+      const acc = cloud.getAccount();
+      localOnlyPosts.forEach(lp => {
+        if (!lp || !lp.isMine || autoSyncAttempted.has(lp.id)) return;
+        autoSyncAttempted.add(lp.id);
+        if (acc && acc.publicUid) {
+          lp.authorUid = lp.authorUid || acc.publicUid;
+          if (lp.author) lp.author.id = lp.author.id || acc.publicUid;
+        }
+        cloud.publishPost(lp)
+          .then(() => {
+            lp._cloud = true;
+            saveState();
+            cloud.forceRefresh().catch(() => {});
+          })
+          .catch(() => {
+            setTimeout(() => autoSyncAttempted.delete(lp.id), 20000);
+          });
+      });
+    }
   }
 
   function initCloudBridge() {
@@ -922,15 +825,26 @@
         if (acc && acc.publicUid && state.persona) {
           state.persona.id = acc.publicUid;
         }
-        render();
+        const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+        if (!top || (top.name !== 'publish' && top.name !== 'verification' && top.name !== 'settings')) {
+          render();
+        }
       },
       onPostsSnapshot(posts) {
         nav.cloudConnected = true;
+        nav.cloudError = '';
         mergeCloudPostsIntoState(posts);
-        render();
+        const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+        if (!top || (top.name !== 'publish' && top.name !== 'verification' && top.name !== 'settings' && top.name !== 'search')) {
+          render();
+        }
       },
       onSyncError(err) {
         nav.cloudError = (err && err.message) || '云端同步暂不可用';
+        const top = nav.stack.length > 0 ? nav.stack[nav.stack.length - 1] : null;
+        if (!top && nav.activeTab === 'home') {
+          render();
+        }
       }
     });
   }
@@ -1068,7 +982,18 @@
   function getFilteredHomePosts(tabKey) {
     const all = visiblePosts();
     if (tabKey === 'RECOMMENDED') {
-      return [...all].sort((a, b) => (b.likeCount + (b.comments.length * 3)) - (a.likeCount + (a.comments.length * 3)));
+      const seedIds = new Set((D.INITIAL_POSTS || []).map(p => p.id));
+      return [...all].sort((a, b) => {
+        const aLive = (a._cloud || !seedIds.has(a.id)) ? 1 : 0;
+        const bLive = (b._cloud || !seedIds.has(b.id)) ? 1 : 0;
+        if (aLive !== bLive) return bLive - aLive;
+        if (aLive === 1) {
+          const aTs = Number(a._createdMs || a.createdAtMs || 0);
+          const bTs = Number(b._createdMs || b.createdAtMs || 0);
+          if (aTs !== bTs) return bTs - aTs;
+        }
+        return (b.likeCount + (b.comments.length * 3)) - (a.likeCount + (a.comments.length * 3));
+      });
     }
     if (tabKey === 'RELATIONSHIP') return all.filter(p => p.category === 'RELATIONSHIP');
     if (tabKey === 'MARKETPLACE') return all.filter(p => p.category === 'MARKETPLACE');
@@ -1080,14 +1005,16 @@
 
   function renderHomeFeedInnerHtml(tabKey) {
     const list = getFilteredHomePosts(tabKey);
+    const liveCount = Array.isArray(nav.cloudPosts) ? nav.cloudPosts.length : 0;
+    const statusText = nav.cloudConnected
+      ? (liveCount > 0 ? `全校实时互通已开启 · 已同步 ${liveCount} 条校园动态` : '全校实时互通已开启 · 大家发帖即时可见')
+      : (nav.cloudError ? '云端同步重连中 · 点击右侧刷新重试' : '正在连接全校实时树窝...');
     const cloudBar = `
       <div class="cloud-sync-strip">
         <div style="display:flex;align-items:center;gap:0.4rem;min-width:0;">
           <span class="cloud-sync-dot ${nav.cloudConnected ? '' : 'offline'}"></span>
           <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-            ${nav.cloudConnected
-              ? '全校实时互通已开启 · 大家发帖即时可见'
-              : '正在连接全校实时树窝...'}
+            ${statusText}
           </span>
         </div>
         <div style="display:flex;align-items:center;gap:0.35rem;flex-shrink:0;">
@@ -3557,7 +3484,7 @@
     bindDynamicInputs();
   }
 
-  // ---------------- Master Render (Scroll-Preserving) ----------------
+  // ---------------- Master Render (Vertical + Horizontal Scroll-Preserving) ----------------
   function render(opts) {
     applyTheme();
     stopMarquee();
@@ -3570,10 +3497,16 @@
     const viewport = document.getElementById('main-viewport');
     const modalRoot = document.getElementById('modal-root');
 
-    // Save current screen's vertical scroll position BEFORE touching DOM
+    // Capture numeric scroll positions BEFORE replacing viewport.innerHTML
+    // (detaching DOM nodes resets their scrollTop/scrollLeft to 0 in Chrome/Safari!)
     const prevScroller = viewport ? viewport.querySelector('.scroll-area') : null;
-    if (prevScroller && nav.lastScreenKey) {
-      nav.scrollMap[nav.lastScreenKey] = prevScroller.scrollTop;
+    const prevScrollTop = prevScroller ? prevScroller.scrollTop : 0;
+    const prevHScrolls = viewport
+      ? Array.from(viewport.querySelectorAll('.h-scroll-row')).map(el => el.scrollLeft)
+      : [];
+    if (nav.lastScreenKey) {
+      if (prevScroller) nav.scrollMap[nav.lastScreenKey] = prevScrollTop;
+      if (prevHScrolls.length) nav.hScrollMap[nav.lastScreenKey] = prevHScrolls;
     }
 
     const nextKey = getCurrentScreenKey();
@@ -3606,22 +3539,46 @@
     modalRoot.innerHTML = renderModal();
     renderBottomChrome();
 
-    // Restore vertical scroll position so clicking any button never jumps back to top
+    // Restore vertical + horizontal scroll positions so tapping bottom/right tags NEVER jumps back!
     const nextScroller = viewport.querySelector('.scroll-area');
+    const nextHRows = Array.from(viewport.querySelectorAll('.h-scroll-row'));
     const resetScroll = Boolean(opts && opts.resetScroll);
-    if (nextScroller && !resetScroll) {
-      const savedTop = isSameScreen
-        ? (prevScroller ? prevScroller.scrollTop : (nav.scrollMap[nextKey] || 0))
-        : (nav.scrollMap[nextKey] || 0);
-      if (savedTop > 0) {
+    const savedTop = resetScroll
+      ? 0
+      : (isSameScreen ? prevScrollTop : (nav.scrollMap[nextKey] || 0));
+    const savedHScrolls = resetScroll
+      ? []
+      : (isSameScreen ? prevHScrolls : (nav.hScrollMap[nextKey] || []));
+
+    const applyScrollRestoration = () => {
+      if (nextScroller && !resetScroll && savedTop > 0) {
         nextScroller.scrollTop = savedTop;
       }
+      if (!resetScroll && savedHScrolls.length) {
+        nextHRows.forEach((row, idx) => {
+          const left = savedHScrolls[idx];
+          if (typeof left === 'number' && left > 0) row.scrollLeft = left;
+        });
+      }
+      const tabsRowNow = document.getElementById('home-tabs-row');
+      if (tabsRowNow && nav.homeTabsScrollLeft > 0) {
+        tabsRowNow.scrollLeft = nav.homeTabsScrollLeft;
+      }
+    };
+
+    applyScrollRestoration();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        if (getCurrentScreenKey() === nextKey) applyScrollRestoration();
+      });
     }
     nav.lastScreenKey = nextKey;
 
     const nextTabsRow = document.getElementById('home-tabs-row');
-    if (nextTabsRow && nav.homeTabsScrollLeft > 0) {
-      nextTabsRow.scrollLeft = nav.homeTabsScrollLeft;
+    if (nextTabsRow) {
+      nextTabsRow.addEventListener('scroll', () => {
+        nav.homeTabsScrollLeft = nextTabsRow.scrollLeft;
+      }, { passive: true });
     }
 
     if (nav.stack.length === 0 && nav.activeTab === 'discover') {
@@ -3876,22 +3833,11 @@
           tabsRow.querySelectorAll('.aurora-tab-pill').forEach(btn => {
             btn.classList.toggle('active', btn.getAttribute('data-tab') === nextTab);
           });
-          const rowRect = tabsRow.getBoundingClientRect();
-          const pillRect = actionEl.getBoundingClientRect();
-          if (pillRect.left < rowRect.left + 12) {
-            tabsRow.scrollTo({
-              left: Math.max(0, tabsRow.scrollLeft - (rowRect.left + 14 - pillRect.left)),
-              behavior: 'smooth'
-            });
-          } else if (pillRect.right > rowRect.right - 12) {
-            tabsRow.scrollTo({
-              left: tabsRow.scrollLeft + (pillRect.right - rowRect.right + 14),
-              behavior: 'smooth'
-            });
-          }
+          // Keep the horizontal tab bar's scrollLeft completely stable (never snap/jump!)
           nav.homeTabsScrollLeft = tabsRow.scrollLeft;
           feedScroll.innerHTML = renderHomeFeedInnerHtml(nextTab);
           feedScroll.scrollTop = 0;
+          nav.scrollMap['tab:home'] = 0;
           attachPullToRefresh();
         } else {
           render();
@@ -4658,12 +4604,14 @@
             topicTags: mergedTags,
             mediaList: (d.mediaList || []).slice(0, 4),
             createdAt: '刚刚',
+            createdAtMs: Date.now(),
             viewCount: 1,
             likeCount: 0,
             bookmarkCount: 0,
             isLiked: false,
             isBookmarked: false,
             isMine: true,
+            _cloud: false,
             allowComments: d.allowComments,
             price: finalPrice,
             moodTag: finalMood,
@@ -4677,10 +4625,21 @@
           const cloud = getCloud();
           if (cloud && cloud.isReady()) {
             const acc = cloud.getAccount();
-            newPost._cloud = true;
             newPost.authorUid = acc.publicUid;
             newPost.author.id = acc.publicUid;
-            cloud.publishPost(newPost).catch(() => {});
+            autoSyncAttempted.add(newPost.id);
+            cloud.publishPost(newPost)
+              .then(() => {
+                newPost._cloud = true;
+                saveState();
+                cloud.forceRefresh().catch(() => {});
+              })
+              .catch(() => {
+                newPost._cloud = false;
+                saveState();
+                setTimeout(() => autoSyncAttempted.delete(newPost.id), 15000);
+                showToast('已保存到本地，云端同步重试中…');
+              });
           }
           const catTitle = publishCatLabel(d.category);
           nav.pubDraft = null;
@@ -4800,9 +4759,9 @@
     recalculateHotTopicsForDay(getLocalDayKey(), true);
     scheduleSilentMidnightHotTopics();
 
-    // Render splash hollow logo
+    // Splash hollow logo is preloaded directly in index.html (./web/logo-dark.png) — avoid re-assigning src to prevent flicker
     const splashLogo = document.getElementById('splash-logo-img');
-    if (splashLogo) splashLogo.src = getLogoSrc(true);
+    if (splashLogo && !splashLogo.getAttribute('src')) splashLogo.src = getLogoSrc(true);
 
     const enterBtn = document.getElementById('splash-enter-btn');
     const splashEl = document.getElementById('splash-screen');
